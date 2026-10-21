@@ -204,21 +204,12 @@ Runtime IDs and environment details (mostly Ubuntu 22.04 or 18.04, with some new
 
 ### Sources:
 
-https://cloud.google.com/run/docs/configuring/services/automatic-base-image-updates
-https://cloud.google.com/docs/buildpacks/base-images
-https://docs.cloud.google.com/run/docs/configuring/services/runtime-base-images
-https://codelabs.developers.google.com/developing-containers-with-dockerfiles
-
-https://docs.cloud.google.com/run/docs/configuring/services/runtime-base-images
-
-https://docs.cloud.google.com/run/docs/building/containers?_gl=1*i307mg*_up*MQ..&gclid=Cj0KCQiAprLLBhCMARIsAEDhdPfpSJeJlOU3Vua3LrUQ3Q0c_MtS99a4vt2qq1fntxLQWPVR5iH-TtQaAoCpEALw_wcB&gclsrc=aw.ds
-
-https://docs.docker.com/get-started/docker-concepts/building-images/writing-a-dockerfile/
-https://github.com/dnaprawa/dockerfile-best-practices
-https://www.sysdig.com/learn-cloud-native/dockerfile-best-practices
-https://docs.docker.com/get-started/docker-concepts/building-images/multi-stage-builds/
-https://dev.to/pavanbelagatti/what-are-multi-stage-docker-builds-1mi9
-https://codelabs.developers.google.com/developing-containers-with-dockerfiles#0
-https://g3doc.corp.google.com/cloud/containers/g3doc/pro-tips-for-writing-dockerfiles.md?cl=head
+* https://cloud.google.com/run/docs/configuring/services/automatic-base-image-updates
+* https://cloud.google.com/docs/buildpacks/base-images
+* https://cloud.google.com/run/docs/configuring/services/runtime-base-images
+* https://cloud.google.com/run/docs/building/containers
+* https://codelabs.developers.google.com/developing-containers-with-dockerfiles
+* https://docs.docker.com/get-started/docker-concepts/building-images/writing-a-dockerfile/
+* https://docs.docker.com/get-started/docker-concepts/building-images/multi-stage-builds/
 
 

@@ -14,12 +14,18 @@ Every step in this process must be **idempotent**. This means the agent must **a
 
 The following dependencies must be satisfied in order before creating the trigger.
 
-### 1. Ensure `cloudbuild.yaml` Exists
+### 1. Ensure `cloudbuild.yaml` Exists (or Prepare `--inline-config`)
 
-The trigger needs a build configuration file to execute.
+The trigger needs a build configuration to execute, and **whenever a dedicated `--service-account` is used, Cloud Build requires `options: { logging: CLOUD_LOGGING_ONLY }`**:
 
-* **Action**: Check for a `cloudbuild.yaml` file at the root of the source repository.
-* **If it does not exist**: Generate one by translating the user-approved plan. The steps in the generated YAML must be a direct translation of the components defined in the plan's `stages` object. The specifics of the steps (e.g., using `pytest` vs. `mvn test`) should be informed by discovering the application archetype (e.g., by finding a `pyproject.toml` or `pom.xml`).
+```yaml
+options:
+  logging: CLOUD_LOGGING_ONLY
+```
+
+* **Action**: Check if `cloudbuild.yaml` and `Dockerfile` exist on the remote default branch (`git ls-tree "origin/${DEFAULT_BRANCH}" cloudbuild.yaml Dockerfile`).
+* **If present on the remote default branch**: Use `--build-config="cloudbuild.yaml"`.
+* **If `cloudbuild.yaml` or `Dockerfile` only exists locally (not committed to `origin/${DEFAULT_BRANCH}`)**: Pass `--inline-config=<PATH_TO_INLINE_CLOUDBUILD_YAML>` to `gcloud beta builds triggers create developer-connect` (writing the `Dockerfile` in a build step if `Dockerfile` is missing from the remote branch, and including `options: { logging: CLOUD_LOGGING_ONLY }`) so the remote build succeeds on the first try without `FAILED_PRECONDITION: Couldn't read commit`.
 
 ### 2. Ensure Artifact Registry Repository Exists
 
@@ -39,22 +45,42 @@ The `cloudbuild.yaml` file will reference an Artifact Registry repository to pus
     --project=<PROJECT_ID>
   ```
 
-### 3. Ensure Developer Connect and Repository Link Exist
+### 3. Ensure Developer Connect and Repository Link Exist (GitHub, GitLab, Bitbucket)
 
-Cloud Build triggers connect to source code via Developer Connect. The entire connection and repository link must be in place.
+Cloud Build triggers connect to source code via Developer Connect across **GitHub**, **GitLab**, and **Bitbucket**. The entire connection and repository link must be in place.
 
-1.  **Check for Connection**: First, check if a Developer Connect connection already exists for the relevant Git provider (e.g., GitHub) in the target project and region:
+1.  **Check for Connection**: First, check if a Developer Connect connection already exists for the relevant Git provider (**GitHub**, **GitLab**, or **Bitbucket**) in the target project and region:
     ```bash
     gcloud developer-connect connections list --location=<REGION> --project=<PROJECT_ID>
     ```
-2.  **Create Connection (if needed)**: If no suitable connection exists, create one using `gcloud developer-connect connections create` (and prompt the user to complete the GitHub authorization flow via the `installationState.actionUri` in the GCP Console if `STAGE != COMPLETE`):
-    ```bash
-    gcloud developer-connect connections create <CONNECTION_ID> \
-      --location=<REGION> \
-      --project=<PROJECT_ID> \
-      --github-config-app=developer-connect
-    ```
-3.  **Obtain Source URI**: The agent must know the exact URI of the source code repository (e.g., `https://github.com/my-org/my-app.git`). This should be obtained from the user-approved plan, `git remote get-url origin`, or by asking the user directly.
+2.  **Create Connection (if needed)**: If no suitable connection exists, create one using `gcloud developer-connect connections create` based on the Git provider (and prompt the user to complete the authorization flow via the `installationState.actionUri` in the GCP Console if `STAGE != COMPLETE`):
+    *   **GitHub**:
+        ```bash
+        gcloud developer-connect connections create <CONNECTION_ID> \
+          --location=<REGION> \
+          --project=<PROJECT_ID> \
+          --github-config-app=developer-connect
+        ```
+    *   **GitLab (`gitlab.com` or GitLab Enterprise)**:
+        ```bash
+        gcloud developer-connect connections create <CONNECTION_ID> \
+          --location=<REGION> \
+          --project=<PROJECT_ID> \
+          --gitlab-config-webhook-secret-version=<WEBHOOK_SECRET_VERSION> \
+          --gitlab-config-authorizer-credential-user-token-secret-version=<AUTHORIZER_TOKEN_SECRET_VERSION> \
+          --gitlab-config-read-authorizer-credential-user-token-secret-version=<READ_TOKEN_SECRET_VERSION>
+        ```
+    *   **Bitbucket (`bitbucket.org` or Bitbucket Data Center)**:
+        ```bash
+        gcloud developer-connect connections create <CONNECTION_ID> \
+          --location=<REGION> \
+          --project=<PROJECT_ID> \
+          --bitbucket-cloud-config-workspace=<WORKSPACE> \
+          --bitbucket-cloud-config-webhook-secret-version=<WEBHOOK_SECRET_VERSION> \
+          --bitbucket-cloud-config-authorizer-credential-user-token-secret-version=<AUTHORIZER_TOKEN_SECRET_VERSION> \
+          --bitbucket-cloud-config-read-authorizer-credential-user-token-secret-version=<READ_TOKEN_SECRET_VERSION>
+        ```
+3.  **Obtain Source URI**: The agent must know the exact URI of the source code repository (e.g., `https://github.com/<ORG>/<APP>.git`, `https://gitlab.com/<GROUP>/<APP>.git`, or `https://bitbucket.org/<WORKSPACE>/<APP>.git`). This should be obtained from the user-approved plan, `git remote get-url origin`, or by asking the user directly.
 4.  **Check for Repository Link**: Check if a repository link for that specific URI already exists within the Developer Connect connection:
     ```bash
     gcloud developer-connect connections git-repository-links list \
@@ -129,7 +155,16 @@ Cloud Build triggers should **always** use a dedicated, user-managed service acc
 
 ## Final Step: Creating the Trigger via `gcloud`
 
-Once all prerequisites are met, check if the trigger already exists and create it using `gcloud builds triggers create developer-connect`. **You MUST provide the full resource name of the dedicated service account created in Step 4 to the `--service-account` flag.**
+Once all prerequisites are met, resolve the repository's **default branch in remote source control** (do not worry about unpublished local branches) using the Developer Connect repository link's read token + `git ls-remote --symref` so it works across any Git provider (**GitHub**, **GitLab**, **Bitbucket**, etc.) even when there is no local clone:
+
+```bash
+TOKEN=$(gcloud developer-connect connections git-repository-links fetch-read-token <REPO_LINK_ID> \
+  --connection=<CONNECTION_ID> --location=<REGION> --project=<PROJECT_ID> --format="value(token)" --quiet 2>/dev/null || true)
+AUTH_URI=$(echo "<GIT_REPO_URI>" | sed "s|https://|https://x-access-token:${TOKEN}@|")
+DEFAULT_BRANCH=$(GIT_TERMINAL_PROMPT=0 git ls-remote --symref "${TOKEN:+$AUTH_URI}${TOKEN:-<GIT_REPO_URI>}" HEAD 2>/dev/null | awk '/^ref:/ {sub("refs/heads/", "", $2); print $2}')
+```
+
+Then check if the trigger already exists and create it using `gcloud builds triggers create developer-connect`. **You MUST provide the full resource name of the dedicated service account created in Step 4 to the `--service-account` flag.**
 
 ```bash
 gcloud builds triggers describe <TRIGGER_ID> --region=<REGION> --project=<PROJECT_ID> || \
@@ -138,8 +173,19 @@ gcloud builds triggers create developer-connect \
   --region=<REGION> \
   --project=<PROJECT_ID> \
   --repository="projects/<PROJECT_ID>/locations/<REGION>/connections/<CONNECTION_ID>/gitRepositoryLinks/<REPO_LINK_ID>" \
-  --branch-pattern="<BRANCH_REGEX>" \
+  --branch-pattern="^${DEFAULT_BRANCH}$" \
   --build-config="cloudbuild.yaml" \
   --service-account="projects/<PROJECT_ID>/serviceAccounts/<SA_NAME>@<PROJECT_ID>.iam.gserviceaccount.com"
 ```
-*(Note: If the trigger should run on tags instead of branches, replace `--branch-pattern="<BRANCH_REGEX>"` with `--tag-pattern="<TAG_REGEX>"`.)*
+*(Note: If the trigger should run on tags instead of branches, replace `--branch-pattern="^${DEFAULT_BRANCH}$"` with `--tag-pattern="<TAG_REGEX>"`.)*
+
+### Running the Trigger Manually via `gcloud`
+
+When invoking the trigger with `gcloud builds triggers run`, always target the **default branch in remote source control** (`${DEFAULT_BRANCH}`, resolved from `refs/remotes/origin/HEAD` or `git ls-remote --symref origin HEAD`; do not check for or worry about unpublished local branches) and **strip any `^` or `$` regex characters** (pass `--branch="${DEFAULT_BRANCH}"`, NOT `--branch="^${DEFAULT_BRANCH}$"`):
+
+```bash
+gcloud builds triggers run <TRIGGER_ID> \
+  --region=<REGION> \
+  --project=<PROJECT_ID> \
+  --branch="${DEFAULT_BRANCH}"
+```

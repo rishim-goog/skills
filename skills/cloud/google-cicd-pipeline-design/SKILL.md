@@ -34,7 +34,7 @@ This workflow is for high-level, architectural tasks. It consists of a design ph
 
 Your purpose in this stage is to operate as a collaborative consultant, guiding the user to a complete, concrete, and expert-designed pipeline plan.
 
-1.  **Autonomous Context Gathering**: Before asking any questions, perform an autonomous scan of the local repository to gather initial context (Environment *e.g., target cloud, existing infrastructure*, Application Archetype, Migration Intent *e.g., from Jenkins, from on-prem*).
+1.  **Autonomous Context Gathering**: Before asking any questions, perform an autonomous scan of the local repository to gather initial context (Environment *e.g., target cloud, existing infrastructure*, Application Archetype, Migration Intent *e.g., from Jenkins, from on-prem*). In addition, check for `.gcp-deploy/deployment-config.json` (pulled from the organization's source control configuration repository—**GitHub**, **GitLab**, **Bitbucket**, or any Git provider—per `references/how_to_load_deployment_config.md`) and local `gcp-deploy.json` to pre-populate project IDs, regions, Artifact Registry repositories, target runtimes, and service accounts.
 2.  **Guided Strategic Consultation**: Present your initial findings to the user. Then, ask key strategic questions to clarify their release strategy (e.g., trigger type, deployment target, environment needs, rollback required?, canary deployments required?).
 3.  **Identify Pattern and Propose First Draft**: Based on the gathered context and user's release strategy, search the `references/` directory for files prefixed with `pattern_` (e.g., `pattern_trunk_based_push_to_deploy.txt`). Select the best-matching pattern.
 4.  **Best Practice Cross-Reference**: Before proposing the draft, you MUST read any relevant `how_to_` files in the `references/` directory (e.g., `how_to_build_cloudbuild_yaml.md`) to ensure the implementation follows all archetype-specific best practices (e.g., linting, testing, image tagging, scanning, provenance).
@@ -78,5 +78,6 @@ Once the user has approved the YAML plan, you must guide them through the implem
 
 ### Defaults
 
-* **Google Cloud**: If gcloud is installed use `gcloud config list` to get the default *project* and *region*.
-* **GIT URL**: If git is installed use `git remote get-url origin` to get the git url for Developer Connect (`gcloud developer-connect`) commands.
+* **Git-Backed Organization Config (`deployment-config.json` & `gcp-deploy.json`)**: First check `.gcp-deploy/deployment-config.json` (fetched from the configured source control repository—**GitHub**, **GitLab**, **Bitbucket**, or any Git provider—per `references/how_to_load_deployment_config.md`) and local `gcp-deploy.json` for `project_id`, `region`, `active_runtime`, `artifact_registry`, and `service_accounts`. If not yet configured for a new project, prompt the user once for the Git config repository URL and persist it.
+* **Google Cloud CLI Fallback**: If no `deployment-config.json` is used, run `gcloud config list` to get the default *project* and *region*.
+* **GIT URL**: If git is installed use `git remote get-url origin` to get the remote Git repository URL (across GitHub, GitLab, Bitbucket, or any supported Git provider) for Developer Connect (`gcloud developer-connect`) commands.

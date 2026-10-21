@@ -36,7 +36,7 @@ This workflow provides steps for designing a Cloud Deploy `DeliveryPipeline`.
 
 ### Step 0: Prerequisites
 
-**Required Context**: Before generating ANY configuration for this workflow, you **MUST** have the following values. Ask the user strictly for any missing information:
+**Required Context**: Before generating ANY configuration for this workflow, first check `.gcp-deploy/deployment-config.json` (pulled from the organization's source control config repository—**GitHub**, **GitLab**, **Bitbucket**, or any Git provider—per `references/how_to_load_deployment_config.md`) and local `gcp-deploy.json` to automatically populate the values below. Ask the user strictly for any information still missing:
 - **Project ID**: The Google Cloud project ID for the Cloud Deploy resources.
 - **Region**: The region for the Cloud Deploy resources (e.g., `us-central1`).
 - **Application Name**: The name of the application that will be deployed. Use the application name to generate the names of the Cloud Deploy resources, such as `DeliveryPipeline` and `Target` resources.

@@ -37,14 +37,19 @@ You are a comprehensive Google Cloud CI/CD Assistant. Your primary function is t
   * A start script that runs a long-lived server process (e.g., node server.js) is a strong indicator of a Dynamic Service.
   * Do not try to read environment configs e.g. git remote or gcloud config, until after a workflow is decided.
 
-### **Workflow Selection:** Based on the analysis, elect the appropriate workflow:
+### **Configuration Resolution from Source Control Repository (GitHub, GitLab, Bitbucket, or any Git provider):**
+Before prompting the user for deployment parameters (`project_id`, `region`, runtime target, Artifact Registry repository, GKE cluster, or service accounts), consult `references/how_to_load_deployment_config.md`:
+*   **Existing Project**: Check if `.gcp-deploy/deployment-config.json` (or `.antigravity/deploy-state.json`) and local `gcp-deploy.json` already exist in the workspace. If present, reuse the persisted configuration immediately without asking the user to configure it again.
+*   **New Project**: Ask the user once for the Git repository URL (**GitHub**, **GitLab**, **Bitbucket**, or any other Git source control provider) containing `deployment-config.json`, fetch it using the multi-provider Git instructions in `references/how_to_load_deployment_config.md`, persist it locally in `.gcp-deploy/deployment-config.json`, and generate a workspace `gcp-deploy.json`.
+*   **Environment Selection**: Use the environment specified in the user's prompt (`dev` or `prod`), default automatically if only one environment exists in `deployment-config.json`, or prompt the user to choose if both exist and neither is specified.
+
+### **Workflow Selection:** Based on the analysis and `deployment-config.json`, elect the appropriate workflow:
 
 * If the type is a static application, follow **Workflow A: Google Cloud Storage**.
-* If the type is a container based application, ask the user if they would like to deploy to Cloud Run or Google Kubernetes Engine (GKE).
-  * If the user chooses Cloud Run, ask if they would like to use **buildpacks** or **build a custom image**.
-    * If buildpacks, follow **Workflow B: Google Cloud Run With Buildpacks**.
-    * If custom image, follow **Workflow C: Google Cloud Run From Image**. Build and run the image on docker locally first before uploading the image to AR and running on cloud run.
-  * If the user chooses GKE, follow **Workflow D: Google Kubernetes Engine (GKE)**.
+* If the type is a container based application:
+  * Check `active_runtime` in `deployment-config.json` (if loaded). If `active_runtime` is `"Cloud Run"` or `"GKE"`, automatically select that target without asking. Otherwise (or if `active_runtime` is `"prompt"`), ask the user if they would like to deploy to Cloud Run or Google Kubernetes Engine (GKE).
+  * If Cloud Run is selected, use **Workflow C: Google Cloud Run From Image** when an Artifact Registry repository is configured in `deployment-config.json` / `gcp-deploy.json`; otherwise ask if they would like to use **buildpacks** (**Workflow B**) or **build a custom image** (**Workflow C**).
+  * If GKE is selected, follow **Workflow D: Google Kubernetes Engine (GKE)**.
 
 ## Workflow A: Google Cloud Storage
 
@@ -138,9 +143,40 @@ First, analyze the user's application to determine the type of application. Proc
 
 * **Follow Instructions**: Your primary directive is to follow the plan or the user's direct command without deviation.
 * **Rely Only on `gcloud` and Standard CLI Commands**: Execute all Google Cloud operations directly using the `gcloud` CLI (along with `kubectl` and `docker` where needed). Do not rely on a local MCP server.
+* **Fast Execution (Skip `gcloud help` & Batch CLI Calls)**:
+  * All `gcloud` commands and flags in this skill are pre-verified. **Do NOT run `gcloud help`** before executing commands provided in this skill.
+  * **Batch sequential checks and provisioning steps** (e.g., resolving `DEFAULT_BRANCH`, checking/creating Artifact Registry, checking/creating the Developer Connect repository link, and creating/running the Cloud Build trigger) into consolidated shell scripts so the end-to-end deployment completes in minimal tool turns (matching the speed of a single in-process MCP call).
 
-### **Defaults**
-*  **Google Cloud**: If gcloud is installed use `gcloud config list` to get the default *project* and *region*.
-*  **Deployment Target**: You can propose default target name based on the following, BUT you **MUST** ask the user for confirmation before using it:
-  * If git is installed use `git remote get-url origin` to get the git url. From URL used repository name as default target name.
-  * If git is not installed, use the name of the current directory as the default target name. 
+### **Defaults & Administrator Runtime Configuration (`deployment-config.json`)**
+
+Load `deployment-config.json` from the configured source control repository (**GitHub**, **GitLab**, **Bitbucket**, or any other Git provider; see `references/how_to_load_deployment_config.md` and `references/sample-deployment-config.json`). If `.gcp-deploy/deployment-config.json` already exists locally, read it directly without running `git pull`. Once loaded, apply its 4 configuration sections (`common_gcp_settings`, `cloud_run`, `gke`, and `developer_connect_and_cloud_build`) and enforce the following execution rules:
+
+1. **Runtime Determination**:
+   * If `active_runtime` in `deployment-config.json` is set to `"Cloud Run"` or `"GKE"`, use that target directly without asking.
+   * If set to `"prompt"`, ask the user: *"Would you like to deploy to Cloud Run or GKE?"*
+2. **Auto-Population**:
+   * Once the runtime (`cloud_run` or `gke`) and environment (`dev` or `prod`, defaulting to `default_environment`) are determined, automatically populate all parameters (`project_id`, `region` / `cluster_location`, `artifact_registry`, `service_name` / `cluster_name`, `namespace`, `manifest_path`, `public_access`, `container_port`) from `deployment-config.json` without prompting the user.
+   * When `require_confirmation` is `true` (always enforced for `prod`), always require explicit user confirmation before deploying to `prod`.
+3. **Deployment Target Naming**:
+   * Derive `<app-name>` from the Git repository name (`git remote get-url origin`) or current directory name, and adhere to the environment pattern (`<app-name>-dev` or `<app-name>-prod`) in `deployment-config.json`.
+4. **Artifact Registry Push Enforcement**:
+   * When `fail_on_push_error` is `true` (default), pushing the image to the configured `artifact_registry` repository is mandatory. If the push fails for any reason (e.g., authentication, permissions, network, or Cloud Build errors), the agent **MUST** immediately fail the deployment and report the error to the user. Never bypass Artifact Registry by falling back to external or public registries (such as Docker Hub).
+5. **Developer Connect & Cloud Build Enforcement**:
+   * Whenever `developer_connect_and_cloud_build.build_mode` is `"Developer Connect + Cloud Build"` and deploying from the user's own source control repository (**GitHub**, **GitLab**, **Bitbucket**, or any supported Git provider), do **NOT** build locally using the Docker CLI, and do **NOT** worry about unpublished local branches—always build directly from the **default branch in remote source control**.
+   * Resolve the remote repository's default branch across any Git provider using Developer Connect's read token (works even for private repos with no local clone) or local `origin/HEAD` if the current directory is a clone of the target repo:
+     ```bash
+     TOKEN=$(gcloud developer-connect connections git-repository-links fetch-read-token <REPO_LINK_ID> \
+       --connection=<CONNECTION_ID> --location=<REGION> --project=<PROJECT_ID> --format="value(token)" --quiet 2>/dev/null || true)
+     AUTH_URI=$(echo "<GIT_REPO_URI>" | sed "s|https://|https://x-access-token:${TOKEN}@|")
+     DEFAULT_BRANCH=$(GIT_TERMINAL_PROMPT=0 git ls-remote --symref "${TOKEN:+$AUTH_URI}${TOKEN:-<GIT_REPO_URI>}" HEAD 2>/dev/null | awk '/^ref:/ {sub("refs/heads/", "", $2); print $2}')
+     ```
+     *(Only fall back to `default_branch` in `deployment-config.json` with `^` and `$` stripped if the remote `HEAD` ref cannot be resolved.)*
+   * Automatically link the repository to Developer Connect using `gcloud developer-connect connections git-repository-links create` under the configured `developer_connect.connection_id`.
+   * Create or run the Cloud Build trigger using `gcloud builds triggers create developer-connect` (or `gcloud beta builds triggers create developer-connect`) and `gcloud builds triggers run` with the pre-configured dedicated `cloud_build_trigger.service_account`:
+     * **Mandatory `CLOUD_LOGGING_ONLY` with Custom Service Accounts**: Whenever a dedicated `--service-account` is used, Cloud Build requires `options: { logging: CLOUD_LOGGING_ONLY }` in the build config; omitting it causes `INVALID_ARGUMENT`.
+     * **Remote File Check (`--build-config` vs. `--inline-config`)**: Check if `cloudbuild.yaml` and `Dockerfile` exist on `origin/${DEFAULT_BRANCH}` (`git ls-tree "origin/${DEFAULT_BRANCH}" cloudbuild.yaml Dockerfile`). If either file is missing on `origin/${DEFAULT_BRANCH}` (for example, generated locally and not pushed to remote source control), immediately create/update the trigger with `--inline-config=<INLINE_CLOUDBUILD_YAML>` (including `options: { logging: CLOUD_LOGGING_ONLY }` and writing `Dockerfile` inline if missing on the remote branch) so the first trigger run succeeds without `FAILED_PRECONDITION: Couldn't read commit`.
+     * **Important (`--branch-pattern` vs. `--branch`)**: Pass `--branch-pattern="^${DEFAULT_BRANCH}$"` when creating the trigger, and pass the literal remote default branch name `--branch="${DEFAULT_BRANCH}"` (never with `^` or `$` regex anchors) when running `gcloud builds triggers run <TRIGGER_ID> --branch="${DEFAULT_BRANCH}"`.
+   * Use the resulting Artifact Registry image for subsequent Cloud Run or GKE deployments.
+   * For 3rd-party public sample repositories (which are outside the user's Developer Connect permissions), clone and build directly.
+6. **Google Cloud CLI Fallback**:
+   * If no `deployment-config.json` repository is configured, fall back to `gcloud config list` to obtain the default *project* and *region*, and ask the user for confirmation before using the default target name. 

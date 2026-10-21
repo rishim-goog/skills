@@ -135,8 +135,8 @@ To maintain a clean module interface, use the main identifier for singleton reso
     }
     ```
 
-4. Developer Connect Connection
-   When configuring `google_developer_connect_connection`, always set `github_app` to `"DEVELOPER_CONNECT"`. Using `"FIREBASE"` is incorrect and will cause triggers to fail.
+4. Developer Connect Connection (GitHub, GitLab, Bitbucket)
+   When configuring `google_developer_connect_connection`, configure the block matching the user's source control provider (`github_config`, `github_enterprise_config`, `gitlab_config`, `gitlab_enterprise_config`, `bitbucket_cloud_config`, or `bitbucket_data_center_config`). If using `github_config`, always set `github_app` to `"DEVELOPER_CONNECT"` (using `"FIREBASE"` is incorrect and will cause triggers to fail).
 
     ```hcl
     resource "google_developer_connect_connection" "main" {
@@ -144,6 +144,7 @@ To maintain a clean module interface, use the main identifier for singleton reso
       connection_id = var.connection_id
       project       = var.project_id
 
+      # Example for GitHub (use gitlab_config / bitbucket_cloud_config for GitLab / Bitbucket):
       github_config {
         github_app = "DEVELOPER_CONNECT" # CORRECT
         authorizer_credential {
@@ -167,7 +168,7 @@ To maintain a clean module interface, use the main identifier for singleton reso
       location                = var.region
       parent_connection       = google_developer_connect_connection.main.connection_id
       git_repository_link_id  = "my-repo-link"
-      clone_uri               = var.github_repo_uri
+      clone_uri               = var.git_repo_uri
     }
     ```
 
