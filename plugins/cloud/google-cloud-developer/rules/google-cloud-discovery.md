@@ -14,6 +14,7 @@ When a request needs depth the bundled skills do not cover, name the likely
 catalog skill and fetch it. Catalog names are predictable:
 
 - `gke-*` - GKE clusters, networking, storage, scaling, cost, AI inference, troubleshooting
+- `google-cicd-*` - CI/CD deployment, Cloud Build pipelines, Artifact Registry, Cloud Deploy release orchestration, Terraform
 - `agent-platform-*` - model deploy, tuning, RAG, eval, endpoints, prompts
 - `google-cloud-solution-*` - multi-product reference architectures
 - `google-cloud-waf-*` - Well-Architected Framework pillars

@@ -143,6 +143,10 @@ This command gives you an option to also remove obsolete skills.
   - [**Developer Device Platform**](./skills/cloud/developer-device-platform-basics)
   - [**gcloud CLI Skill for AI Agents**](./skills/cloud/gcloud)
   - [**Google Agents CLI Onboarding**](./skills/cloud/google-agents-cli-onboarding)
+  - [**Google Cloud CI/CD Deploy**](./skills/cloud/google-cicd-deploy)
+  - [**Google Cloud CI/CD Pipeline Design**](./skills/cloud/google-cicd-pipeline-design)
+  - [**Google Cloud CI/CD Release Orchestration (Cloud Deploy)**](./skills/cloud/google-cicd-release-orchestration)
+  - [**Google Cloud CI/CD Terraform**](./skills/cloud/google-cicd-terraform)
   - [**Google Developer Knowledge**](./skills/developers/retrieving-developer-knowledge)
 - **Application development**
   - [**Migrate Legacy Codebases to Safe Rust**](./skills/developers/migrate-to-rust)
