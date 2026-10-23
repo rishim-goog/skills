@@ -1,0 +1,51 @@
+# Stage 1: Base Builder Image (Heavy dependencies)
+FROM node:lts-trixie-slim AS base-builder
+
+RUN apt-get update && apt-get install -y \
+    curl \
+    git \
+    jq \
+    procps \
+    python3 \
+    python3-yaml \
+    python3-pip \
+    unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python3 -m pip install --break-system-packages python-hcl2
+
+RUN curl -L https://github.com/mikefarah/yq/releases/download/v4.45.1/yq_linux_amd64 -o /usr/bin/yq && \
+    chmod +x /usr/bin/yq
+
+# gcloud + kubectl + gke-gcloud-auth-plugin
+RUN curl -sSL https://sdk.cloud.google.com | bash && \
+    /root/google-cloud-sdk/bin/gcloud components install kubectl gke-gcloud-auth-plugin --quiet
+ENV PATH=${PATH}:/root/google-cloud-sdk/bin
+
+# Terraform
+RUN curl -LO https://releases.hashicorp.com/terraform/1.14.8/terraform_1.14.8_linux_amd64.zip \
+    && unzip terraform_1.14.8_linux_amd64.zip \
+    && mv terraform /usr/local/bin/ \
+    && rm terraform_1.14.8_linux_amd64.zip
+
+# Gemini CLI
+RUN npm install -g @google/gemini-cli
+
+ENTRYPOINT []
+
+# Stage 2: Final Eval Image (gcloud-native CI/CD skills, no local MCP server)
+FROM base-builder AS eval-docker-provider
+
+RUN mkdir -p /root/.gemini/skills
+COPY skills/cloud/google-cicd-deploy /root/.gemini/skills/google-cicd-deploy
+COPY skills/cloud/google-cicd-pipeline-design /root/.gemini/skills/google-cicd-pipeline-design
+COPY skills/cloud/google-cicd-release-orchestration /root/.gemini/skills/google-cicd-release-orchestration
+COPY skills/cloud/google-cicd-terraform /root/.gemini/skills/google-cicd-terraform
+
+RUN printf '%b' '{\n\
+  "/": "TRUST_PARENT"\n\
+}\n' > /root/.gemini/trustedFolders.json
+
+ENV HOME=/root
+
+CMD ["sh"]

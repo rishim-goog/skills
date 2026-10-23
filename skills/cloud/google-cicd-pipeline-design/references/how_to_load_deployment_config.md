@@ -11,8 +11,10 @@ Before asking the developer for Google Cloud parameters (`project_id`, `region`,
 1.  **Check Persisted Workspace Configuration First**:
     *   Inspect the workspace for an existing `.gcp-deploy/deployment-config.json` (and optional `.gcp-deploy/config-state.json` or local `gcp-deploy.json`).
     *   **Existing Project**: If `.gcp-deploy/deployment-config.json` is already present in the workspace, **read and use it immediately without asking the developer to re-configure it and without running `git pull`** (avoiding unnecessary network or credential prompt delays).
-2.  **New Project Onboarding**:
-    *   If no configuration state exists in the workspace, ask the developer **once**:
+2.  **Explicit Prompt / Workspace Context Parameters**:
+    *   If `.gcp-deploy/deployment-config.json` does not exist locally, but the required deployment parameters (`project_id`, `region`, and target resource name) are already explicitly provided in the user prompt or workspace context (`GEMINI.md`), use those parameters directly without stopping to ask for a `deployment-config.json` Git repository URL.
+3.  **New Project Onboarding**:
+    *   Otherwise, if no configuration state exists in the workspace, ask the developer **once**:
         > *"Please provide the Git repository URL (GitHub, GitLab, Bitbucket, or your source control provider) containing your organization's `deployment-config.json` (or let me know if you want to configure parameters manually)."*
     *   Once fetched, save the file to `.gcp-deploy/deployment-config.json`, record the repository URL in `.gcp-deploy/config-state.json`, and ensure `.gcp-deploy/` is ignored in `.gitignore` and `.dockerignore` so future prompts in the project automatically reuse it.
 

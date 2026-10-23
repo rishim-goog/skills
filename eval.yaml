@@ -1,0 +1,483 @@
+# Copyright 2023 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+version: "1"
+
+defaults:
+  agent: gemini
+  provider: docker
+  trials: 1 # TODO increase trials
+  timeout: 300
+  threshold: 0.8 # For --ci mode
+  grader_model: gemini-3-flash-preview # default LLM grader model
+  docker:
+    base: cicd-evals:latest
+  env:
+    GOOGLE_APPLICATION_CREDENTIALS: /tmp/keys/adc.json
+  workspace:
+    - src: scripts
+      dest: /workspace/scripts
+    - src: scripts/BASE_GEMINI.md
+      dest: $HOME/.gemini/GEMINI.md
+  environment:
+    mounts:
+      - ~/.config/gcloud/application_default_credentials.json:/tmp/keys/adc.json:ro
+  trialConfig:
+    setup: scripts/setup_gcloud.sh
+
+tasks:
+
+  # Evals for simple static site: https://github.com/sdlc-graph/tinyjam.git
+  - name: deploy-static-site-gcs
+    instruction: |
+      Deploy this static application to Google Cloud.
+
+    workspace:
+      - content: |
+          1. The project id will be available as an environment variable $PROJECT_ID.
+          2. The bucket name should be constructed from gs://${_EVAL_UUID}-${_EVAL_TRIAL}.
+          3. The region to use will be available as an environment variable $REGION.
+        dest: /workspace/GEMINI.md
+
+    trialConfig:
+      setup: |
+        git clone https://github.com/sdlc-graph/tinyjam.git
+        cd tinyjam
+        npm install
+        npx . ./example ./example/_dist
+      cleanup: scripts/teardown-gcs.sh gs://${_EVAL_UUID}-${_EVAL_TRIAL}
+
+    agentWorkingDir: /workspace/tinyjam/example
+
+    graders:
+      - type: deterministic
+        run: scripts/validate-gcs-deployment.sh gs://${_EVAL_UUID}-${_EVAL_TRIAL}
+      - type: tool_usage
+        expectedTools:
+          - name: activate_skill
+            args:
+              name: google-cicd-deploy
+          - name: run_shell_command
+      - type: llm_rubric
+        outcome_assertions:
+          - The agent must scan the codebase for secrets using CLI commands before deploying.
+          - The agent must prefix gcloud commands with CLOUDSDK_METRICS_REQUEST_ATTRIBUTION="agent-skills/1.0 (skill:google-cicd-deploy)".
+
+  # Evals for deploying simple python application: https://github.com/sdlc-graph/chefs-companion
+  - name: deploy-cloud-run-buildpacks-python
+    instruction: |
+      Deploy the python application to Cloud Run
+
+    workspace:
+      - content: |
+          1. The project id will be available as an environment variable $PROJECT_ID. 
+          2. The cloud run service name should be constructed from service-${_EVAL_UUID}-${_EVAL_TRIAL}.
+          4. The region to use will be available as an environment variable $REGION.
+          5. Use buildpacks for building and deploying the application.
+        dest: /workspace/GEMINI.md
+
+    timeout: 600
+
+    trialConfig:
+      setup: |
+        git clone -b buildpacks https://github.com/sdlc-graph/chefs-companion.git
+      cleanup: scripts/teardown-cloud-run.sh service-${_EVAL_UUID}-${_EVAL_TRIAL}
+
+    agentWorkingDir: /workspace/chefs-companion
+
+    graders:
+      - type: deterministic
+        run: scripts/validate-cloud-run-deployment.sh service-${_EVAL_UUID}-${_EVAL_TRIAL}
+      - type: deterministic
+        run: |
+          if [ ! -f chefs-companion/Dockerfile ]; then
+            echo '{"score": 1, "details": "Dockerfile does not exist"}'
+          else
+            echo '{"score": 0, "details": "Dockerfile exists"}'
+          fi
+      - type: tool_usage
+        expectedTools:
+          - name: activate_skill
+            args:
+              name: google-cicd-deploy
+          - name: run_shell_command
+      - type: llm_rubric
+        outcome_assertions:
+          - The agent must use buildpacks (gcloud run deploy --source) to build and deploy the application.
+          - The agent must scan the codebase for secrets using CLI commands before deploying.
+          - The agent must prefix gcloud commands with CLOUDSDK_METRICS_REQUEST_ATTRIBUTION="agent-skills/1.0 (skill:google-cicd-deploy)".
+
+  # Evals for deploying simple python application: https://github.com/sdlc-graph/chefs-companion
+  - name: deploy-cloud-run-no-dockerfile-python
+    instruction: |
+      Deploy the python application to Cloud Run
+
+    workspace:
+      - content: |
+          1. The project id will be available as an environment variable $PROJECT_ID.
+          2. The cloud run service name should be constructed from service-${_EVAL_UUID}-${_EVAL_TRIAL}.
+          3. The artifact registry to use will be available as an environment variable $ARTIFACT_REGISTRY.
+          4. The region to use will be available as an environment variable $REGION.
+          5. Do not use buildpacks for building and deploying the application.
+        dest: /workspace/GEMINI.md
+
+    timeout: 600
+
+    trialConfig:
+      setup: |
+        git clone -b no-dockerfile https://github.com/sdlc-graph/chefs-companion.git
+      cleanup: scripts/teardown-cloud-run.sh service-${_EVAL_UUID}-${_EVAL_TRIAL}
+
+    agentWorkingDir: /workspace/chefs-companion
+
+    graders:
+      - type: deterministic
+        run: scripts/validate-cloud-run-deployment.sh service-${_EVAL_UUID}-${_EVAL_TRIAL}
+      - type: deterministic
+        run: |
+          if [ -f chefs-companion/Dockerfile ]; then
+            echo '{"score": 1, "details": "Dockerfile exists"}'
+          else
+            echo '{"score": 0, "details": "Dockerfile does not exist"}'
+          fi
+      - type: tool_usage
+        expectedTools:
+          - name: activate_skill
+            args:
+              name: google-cicd-deploy
+          - name: run_shell_command
+      - type: llm_rubric
+        outcome_assertions:
+          - The agent must use a custom Docker image to build the application.
+          - The agent must scan the codebase for secrets using CLI commands before building or deploying.
+          - The agent must prefix gcloud commands with CLOUDSDK_METRICS_REQUEST_ATTRIBUTION="agent-skills/1.0 (skill:google-cicd-deploy)".
+
+  # Evals for deploying via .gcp-deploy/deployment-config.json auto-resolution
+  - name: deploy-cloud-run-from-deployment-config
+    instruction: |
+      Deploy this application to the dev environment.
+
+    timeout: 600
+
+    trialConfig:
+      setup: |
+        git clone -b buildpacks https://github.com/sdlc-graph/chefs-companion.git
+        mkdir -p chefs-companion/.gcp-deploy
+        cat <<EOF > chefs-companion/.gcp-deploy/deployment-config.json
+        {
+          "active_runtime": "Cloud Run",
+          "default_environment": "dev",
+          "fail_on_push_error": true,
+          "common_gcp_settings": {
+            "project_id": "${PROJECT_ID}",
+            "region": "${REGION}"
+          },
+          "cloud_run": {
+            "dev": {
+              "project_id": "${PROJECT_ID}",
+              "region": "${REGION}",
+              "service_name": "service-${_EVAL_UUID}-${_EVAL_TRIAL}",
+              "public_access": true,
+              "container_port": 8080
+            }
+          }
+        }
+        EOF
+      cleanup: scripts/teardown-cloud-run.sh service-${_EVAL_UUID}-${_EVAL_TRIAL}
+
+    agentWorkingDir: /workspace/chefs-companion
+
+    graders:
+      - type: deterministic
+        run: scripts/validate-cloud-run-deployment.sh service-${_EVAL_UUID}-${_EVAL_TRIAL}
+      - type: tool_usage
+        expectedTools:
+          - name: activate_skill
+            args:
+              name: google-cicd-deploy
+          - name: run_shell_command
+      - type: llm_rubric
+        outcome_assertions:
+          - The agent must read .gcp-deploy/deployment-config.json to resolve project_id, region, and service_name without prompting the user.
+          - The agent must prefix gcloud commands with CLOUDSDK_METRICS_REQUEST_ATTRIBUTION="agent-skills/1.0 (skill:google-cicd-deploy)".
+
+  # Evals for pipeline design with Terraform
+  - name: pipeline-design-terraform-trunk-based-simple
+    
+    instruction: |
+      Design and implement a simple CI/CD pipeline for my application.
+
+    workspace:
+      - content: |
+          1. The project id will be available as an environment variable $PROJECT_ID.
+          2. The region to use will be available as an environment variable $REGION.
+          3. The artifact registry to use will be available as an environment variable $ARTIFACT_REGISTRY.
+          4. Use Terraform for implementation. 
+          5. All Terraform vars should have defaults set to make it easier to validate later.
+          6. Follow Trunk-Based Push-to-Deploy pattern.
+          7. Cloud Run is the preferred deployment target.
+          8. If you create a GCS bucket for Terraform state, the bucket name should be gs://tf-state-${_EVAL_UUID}-${_EVAL_TRIAL}.
+          9. Do not apply terraform directly.
+          10. Do not submit builds to Cloud Build directly.
+          11. This is for a greenfield setup, so define all necessary infrastructure in Terraform, even if it already exists.
+        dest: /workspace/GEMINI.md
+      
+    timeout: 600
+
+    trialConfig:
+      setup: git clone -b no-cloudbuild https://github.com/sdlc-graph/chefs-companion.git
+      cleanup: scripts/teardown-gcs.sh gs://tf-state-${_EVAL_UUID}-${_EVAL_TRIAL}
+
+    agentWorkingDir: /workspace/chefs-companion
+
+    graders:
+      - type: deterministic
+        run: python3 scripts/validate-cloudbuild-simple-pipeline.py chefs-companion/cloudbuild.yaml
+      - type: deterministic
+        run: python3 scripts/validate-terraform-simple-pipeline.py chefs-companion/terraform
+      - type: tool_usage
+        expectedTools:
+          - name: activate_skill
+            args:
+              name: google-cicd-pipeline-design
+          - name: activate_skill
+            args:
+              name: google-cicd-terraform
+      - type: llm_rubric
+        outcome_assertions:
+          - Terraform must be used to implement the pipeline.
+          - The trunk-based push-to-deploy pattern must be used.
+          - Cloud Run must be used as the deployment target.
+
+  # Evals for deploying simple python application with canary strategy targeting GKE
+  - name: release-orchestration-canary-gke
+    instruction: |
+      Design and create a Cloud Deploy delivery pipeline for the python application targeting GKE with a canary deployment strategy for the production environment.
+      The pipeline should target both staging and prod environments, but only the prod target should use a canary strategy.
+
+    workspace:
+      - content: |
+          1. The project id will be available as an environment variable $PROJECT_ID.
+          2. The region to use will be available as an environment variable $REGION.
+          3. The application name is chefs-companion.
+          4. Define a delivery pipeline and targets for staging and prod in clouddeploy.yaml.
+          5. The staging target should point to a GKE cluster named cluster-staging.
+          6. The prod target should point to a GKE cluster named cluster-prod and use a canary strategy with percentages 25 and 75.
+          7. The prod target requires service networking configuration with service name chefs-companion and deployment name chefs-companion.
+          8. Validating the generated configuration files is sufficient. You do not need to apply the pipeline to GCP.
+          9. Generate basic Kubernetes Deployment and Service manifests for the application.
+        dest: /workspace/GEMINI.md
+
+    timeout: 600
+
+    trialConfig:
+      setup: |
+        git clone -b no-cloudbuild https://github.com/sdlc-graph/chefs-companion.git
+    agentWorkingDir: /workspace/chefs-companion
+
+    graders:
+      - type: deterministic
+        run: python3 scripts/validate-clouddeploy.py --runtime=gke --check-canary chefs-companion
+      - type: deterministic
+        run: python3 scripts/validate-skaffold.py --profiles=chefs-companion-staging,chefs-companion-prod chefs-companion
+      - type: deterministic
+        run: python3 scripts/validate-manifests-gke.py chefs-companion
+      - type: tool_usage
+        expectedTools:
+          - name: activate_skill
+            args:
+              name: google-cicd-release-orchestration
+      - type: llm_rubric
+        outcome_assertions:
+          - A clouddeploy.yaml file must be created.
+          - A delivery pipeline must be defined in clouddeploy.yaml.
+          - Staging and prod targets must be defined in clouddeploy.yaml.
+          - The targets must point to GKE clusters.
+          - A canary strategy must be configured for the prod target.
+          - The canary percentages must be set to 25 and 75.
+          - Kubernetes manifests must be generated.
+
+  # Evals for deploying simple python application with multi-environment: https://github.com/sdlc-graph/chefs-companion
+  - name: release-orchestration-multi-env-cloudrun
+    instruction: |
+      Design and create a Cloud Deploy delivery pipeline for the python application.
+      The pipeline should target both staging and prod environments.
+
+    workspace:
+      - content: |
+          1. The project id will be available as an environment variable $PROJECT_ID.
+          2. The region to use will be available as an environment variable $REGION.
+          3. The application name is chefs-companion.
+          4. Define a delivery pipeline and targets for staging and prod in clouddeploy.yaml.
+          5. The staging target should point to a Cloud Run service named service-staging.
+          6. The prod target should point to a Cloud Run service named service-prod.
+          7. Validating the generated configuration files is sufficient. You do not need to apply the pipeline to GCP.
+          8. Configure the pipeline to automatically rollback on failure.
+          9. Configure automatic promotion from staging to prod after successful deployment to staging.
+        dest: /workspace/GEMINI.md
+
+    timeout: 600
+
+    trialConfig:
+      setup: |
+        git clone -b no-cloudbuild https://github.com/sdlc-graph/chefs-companion.git
+    agentWorkingDir: /workspace/chefs-companion
+
+    graders:
+      - type: deterministic
+        run: python3 scripts/validate-clouddeploy.py --runtime=run --check-automations chefs-companion
+      - type: deterministic
+        run: python3 scripts/validate-skaffold.py --profiles=chefs-companion-staging,chefs-companion-prod chefs-companion
+      - type: deterministic
+        run: python3 scripts/validate-manifests-cloudrun.py --services=service-staging,service-prod chefs-companion
+      - type: tool_usage
+        expectedTools:
+          - name: activate_skill
+            args:
+              name: google-cicd-release-orchestration
+      - type: llm_rubric
+        outcome_assertions:
+          - A clouddeploy.yaml file must be created.
+          - A delivery pipeline must be defined in clouddeploy.yaml.
+          - Staging and prod targets must be defined in clouddeploy.yaml.
+
+  # Evals for deploying simple python application with multi-environment targeting GKE
+  - name: release-orchestration-multi-env-gke
+    instruction: |
+      Design and create a Cloud Deploy delivery pipeline for the python application targeting GKE.
+      The pipeline should target both staging and prod environments.
+
+    workspace:
+      - content: |
+          1. The project id will be available as an environment variable $PROJECT_ID.
+          2. The region to use will be available as an environment variable $REGION.
+          3. The application name is chefs-companion.
+          4. Define a delivery pipeline and targets for staging and prod in clouddeploy.yaml.
+          5. The staging target should point to a GKE cluster named cluster-staging.
+          6. The prod target should point to a GKE cluster named cluster-prod.
+          7. Validating the generated configuration files is sufficient. You do not need to apply the pipeline to GCP.
+          8. Generate basic Kubernetes Deployment and Service manifests for the application.
+        dest: /workspace/GEMINI.md
+
+    timeout: 600
+
+    trialConfig:
+      setup: |
+        git clone -b no-cloudbuild https://github.com/sdlc-graph/chefs-companion.git
+    agentWorkingDir: /workspace/chefs-companion
+
+    graders:
+      - type: deterministic
+        run: python3 scripts/validate-clouddeploy.py --runtime=gke chefs-companion
+      - type: deterministic
+        run: python3 scripts/validate-skaffold.py --profiles=chefs-companion-staging,chefs-companion-prod chefs-companion
+      - type: deterministic
+        run: python3 scripts/validate-manifests-gke.py chefs-companion
+      - type: tool_usage
+        expectedTools:
+          - name: activate_skill
+            args:
+              name: google-cicd-release-orchestration
+      - type: llm_rubric
+        outcome_assertions:
+          - A clouddeploy.yaml file must be created.
+          - A delivery pipeline must be defined in clouddeploy.yaml.
+          - Staging and prod targets must be defined in clouddeploy.yaml.
+          - The targets must point to GKE clusters.
+          - Kubernetes manifests must be generated.
+
+  # Evals for deploying simple Java application to GKE
+  - name: deploy-gke-java
+    instruction: |
+      Deploy the Java application to GKE.
+
+    workspace:
+      - content: |
+          1. The project id will be available as an environment variable $PROJECT_ID.
+          2. The GKE cluster name is cluster-prod.
+          3. The GKE cluster location is available as an environment variable $REGION.
+          4. The artifact registry repository name should be repo-${_EVAL_UUID}-${_EVAL_TRIAL}.
+          5. Keep the service private.
+        dest: /workspace/GEMINI.md
+
+    timeout: 1000
+
+    trialConfig:
+      setup: |
+        git clone https://github.com/sdlc-graph/spring-petclinic-docker.git
+    agentWorkingDir: /workspace/spring-petclinic-docker
+
+    graders:
+      - type: tool_usage
+        expectedTools:
+          - name: activate_skill
+            args:
+              name: google-cicd-deploy
+          - name: run_shell_command
+      - type: llm_rubric
+        outcome_assertions:
+          - A Dockerfile must be created.
+          - A Kubernetes Deployment manifest must be generated.
+          - A Kubernetes Service manifest must be generated.
+          - A GKE cluster must be created.
+          - An Artifact Registry repo must be created.
+          - The agent must scan the codebase for secrets using CLI commands before building or deploying.
+          - The agent must prefix gcloud commands with CLOUDSDK_METRICS_REQUEST_ATTRIBUTION="agent-skills/1.0 (skill:google-cicd-deploy)".
+
+  # Evals for pipeline design with Terraform targeting GKE
+  - name: pipeline-design-terraform-gke
+    instruction: |
+      Design and implement a CI/CD pipeline for my application targeting GKE.
+
+    workspace:
+      - content: |
+          1. The project id will be available as an environment variable $PROJECT_ID.
+          2. The region to use will be available as an environment variable $REGION.
+          3. The artifact registry repository name should be repo-${_EVAL_UUID}-${_EVAL_TRIAL}.
+          4. Use Terraform for implementation. 
+          5. All Terraform vars should have defaults set to make it easier to validate later.
+          6. Follow Trunk-Based Push-to-Deploy pattern.
+          7. GKE is the preferred deployment target. The cluster name is cluster-prod.
+          8. If you create a GCS bucket for Terraform state, the bucket name should be gs://tf-state-${_EVAL_UUID}-${_EVAL_TRIAL}.
+          9. Do not apply terraform directly.
+          10. Do not submit builds to Cloud Build directly.
+        dest: /workspace/GEMINI.md
+      
+    timeout: 600
+
+    trialConfig:
+      setup: git clone https://github.com/sdlc-graph/spring-petclinic-docker.git
+      cleanup: scripts/teardown-gcs.sh gs://tf-state-${_EVAL_UUID}-${_EVAL_TRIAL}
+
+    agentWorkingDir: /workspace/spring-petclinic-docker
+
+    graders:
+      - type: tool_usage
+        expectedTools:
+          - name: activate_skill
+            args:
+              name: google-cicd-pipeline-design
+          - name: activate_skill
+            args:
+              name: google-cicd-terraform
+      - type: llm_rubric
+        outcome_assertions:
+          - Terraform must be used to implement the pipeline.
+          - The trunk-based push-to-deploy pattern must be used.
+          - GKE must be used as the deployment target.
+          - A Developer Connect connection must be imported into Terraform.
+          - A Developer Connect git repository link must be imported into Terraform.
+          - A Cloud Build trigger must be created in Terraform.
+          - A dedicated service account (not the default service account) must be defined for the Cloud Build trigger.
+          - A GKE cluster must be created in Terraform.
