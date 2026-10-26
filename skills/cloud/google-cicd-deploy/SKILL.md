@@ -28,13 +28,17 @@ You are a comprehensive Google Cloud CI/CD Assistant. Your primary function is t
  * First explain your plan and then perform analyses of the project.
  * Once you have identified project's programming language and frameworks used, inform user of your findings, before performing further analysis.
 
-### **Application Type Analysis (Mandatory First Step):** Before taking any action, first analyze project to determine if it is a Static Site or a Dynamic Service.
+### **Application Type Analysis (Mandatory First Step):** Before taking any action, first analyze project to determine if it is a Static Site or a Dynamic Service, and whether it is an **Agentic Workload (AI Agent or MCP Server)**.
 
 * Methodology:
-  * Inspect package.json to analyze the build and start scripts.
-  * Look for configuration files from common static site generators (e.g., .eleventy.js, next.config.js, hugo.toml).
-  * A build script that outputs to a folder like public/, dist/, or build/ is a strong indicator of a Static Site.
-  * A start script that runs a long-lived server process (e.g., node server.js) is a strong indicator of a Dynamic Service.
+  * Inspect `package.json`, `pyproject.toml`, `requirements.txt`, `go.mod`, or `pom.xml` to analyze build/start scripts and dependencies.
+  * Look for configuration files from common static site generators (e.g., `.eleventy.js`, `next.config.js`, `hugo.toml`).
+  * A build script that outputs to a folder like `public/`, `dist/`, or `build/` is a strong indicator of a Static Site.
+  * A start script that runs a long-lived server process (e.g., `node server.js`, `uvicorn`, `adk api_server`) is a strong indicator of a Dynamic Service.
+  * **Agentic Workload Detection (AI Agent / MCP Server)**: Check if the project is an AI Agent or Model Context Protocol (MCP) Server:
+    * **AI Agent indicators**: Dependencies or imports for `google-adk`, `@google/adk`, `genkit`, `langchain`, `langgraph`, `crewai`, `autogen`, `a2a-sdk`, or `vertexai.preview.reasoning_engines`; or presence of `agent.py`, `AGENTS.md`, `manifest.yaml` (with agent metadata), `[tool.agent-starter-pack]` in `pyproject.toml`, or `.well-known/agent-card.json` / `agent_card.json`.
+    * **MCP Server indicators**: Dependencies or imports for `mcp`, `@modelcontextprotocol/sdk`, or `fastmcp`; or presence of `mcp-spec.json`.
+    * Whenever an AI Agent or MCP Server is detected, you **MUST** automatically register the deployed workload in **Google Cloud Agent Registry** as part of the deployment workflow (see **Rule 7: Automatic Agent Registry Registration for Agentic Workloads** below).
   * Do not try to read environment configs e.g. git remote or gcloud config, until after a workflow is decided.
 
 ### **Configuration Resolution from Source Control Repository (GitHub, GitLab, Bitbucket, or any Git provider):**
@@ -80,6 +84,7 @@ Your job is to deploy the user's applications to Cloud Run using buildpacks.
 5.  **Deploy**: Deploy the user's application from source to Google Cloud Run using `gcloud run deploy` and return the URL of the deployed application:
     *   Use `gcloud run deploy <SERVICE_NAME> --source=<SOURCE_PATH> --region=<REGION> --project=<PROJECT_ID> --port=<PORT> --allow-unauthenticated` (or `--no-allow-unauthenticated` if private).
     *   Retrieve and return the service URL using `gcloud run services describe <SERVICE_NAME> --region=<REGION> --project=<PROJECT_ID> --format='value(status.url)'`.
+    *   **If the application is an AI Agent or MCP Server**: Immediately register the deployed service in **Google Cloud Agent Registry** using `gcloud agent-registry services create` (or `update`) and verify it in `gcloud agent-registry agents list` (or `mcp-servers list`) per **Rule 7**.
 
 
 ## Workflow C: Google Cloud Run From Image
@@ -101,6 +106,7 @@ Your job is to deploy the user's applications to Cloud Run from an image.
 7.  **Deploy**: Deploy the built application to Google Cloud Run using `gcloud run deploy` and return the URL of the deployed application:
     *   Use `gcloud run deploy <SERVICE_NAME> --image=<IMAGE_URI> --region=<REGION> --project=<PROJECT_ID> --port=<PORT> --allow-unauthenticated` (or `--no-allow-unauthenticated` if private).
     *   Retrieve and return the service URL using `gcloud run services describe <SERVICE_NAME> --region=<REGION> --project=<PROJECT_ID> --format='value(status.url)'`.
+    *   **If the application is an AI Agent or MCP Server**: Immediately register the deployed service in **Google Cloud Agent Registry** using `gcloud agent-registry services create` (or `update`) and verify it in `gcloud agent-registry agents list` (or `mcp-servers list`) per **Rule 7**.
 
 
 ## Workflow D: Google Kubernetes Engine (GKE)
@@ -118,7 +124,9 @@ This workflow is for deploying container-based applications to a GKE cluster. Co
     *   Create if missing: `gcloud artifacts repositories create <REPO_NAME> --repository-format=docker --location=<REGION> --project=<PROJECT_ID>`
 5.  **Build and Push Image**: Check if a local Docker daemon is running (`command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1`). If available, use the Docker CLI to build and push the image; otherwise immediately use `gcloud builds submit --tag <IMAGE_URI> . --project=<PROJECT_ID>` to build and push the image to the created Artifact Registry repository.
 6.  **Manifest Preparation**: Check for existing Kubernetes manifests (e.g., `deployment.yaml`, `service.yaml`) in the project. If they don't exist, ask the user if they would like to create a public or private service. Then generate a standard `Deployment` and a corresponding `Service` manifest (e.g., `LoadBalancer` for public, `ClusterIP` for private). Ensure the manifests use the correct image URI from Step 5, the correct container port from Step 2, and have appropriate resource limits and labels.
+    *   **If the application is an AI Agent or MCP Server**: Automatically annotate and label the `Deployment` manifest for GKE Agent Registry discovery (`registry.gke.io/functional-type: "AGENT"` and `apphub.cloud.google.com/functional-type: "AGENT"` — or `"MCP_SERVER"` — plus `iam.gke.io/spiffe-identity-type: "agent-identity"` on the Pod template) per **Rule 7**.
 7.  **Deploy to GKE**: Deploy the built application to the GKE cluster by following the detailed authentication and deployment procedures in `references/how_to_deploy_to_gke_with_kubectl.md`.
+    *   **If the application is an AI Agent or MCP Server**: Also register the service in **Google Cloud Agent Registry** per **Rule 7**.
 8.  **Verification**: Provide the user with commands to check the deployment status, as detailed in the reference document `references/how_to_deploy_to_gke_with_kubectl.md`, such as `kubectl get pods`, `kubectl get service <APP_NAME>-service`, and `kubectl rollout status deployment/<APP_NAME>`.
 
 
@@ -180,4 +188,64 @@ Load `deployment-config.json` from the configured source control repository (**G
    * Use the resulting Artifact Registry image for subsequent Cloud Run or GKE deployments.
    * For 3rd-party public sample repositories (which are outside the user's Developer Connect permissions), clone and build directly.
 6. **Google Cloud CLI Fallback**:
-   * If no `deployment-config.json` repository is configured, fall back to `gcloud config list` to obtain the default *project* and *region*, and ask the user for confirmation before using the default target name. 
+   * If no `deployment-config.json` repository is configured, fall back to `gcloud config list` to obtain the default *project* and *region*, and ask the user for confirmation before using the default target name.
+7. **Automatic Agent Registry Registration for Agentic Workloads (AI Agents & MCP Servers)**:
+   * Whenever the application being deployed is an **AI Agent** (e.g., uses `google-adk`, `@google/adk`, `genkit`, `langchain`, `langgraph`, `crewai`, `autogen`, `a2a-sdk`, `agent.py`, `AGENTS.md`, `manifest.yaml`, `[tool.agent-starter-pack]`, or `agent_card.json`) or an **MCP Server** (e.g., uses `mcp`, `@modelcontextprotocol/sdk`, `fastmcp`, or `mcp-spec.json`), you **MUST** automatically register the deployed workload in **Google Cloud Agent Registry** immediately after deployment without waiting for a separate user prompt:
+     * **Cloud Run Agent Registration**:
+       * Immediately after deploying the Cloud Run service and retrieving `<SERVICE_URL>`, register (or update if already registered) the agent in Agent Registry:
+         * If an A2A Agent Card (`agent_card.json` or `.well-known/agent-card.json`) exists in the project:
+           ```bash
+           gcloud agent-registry services describe "<SERVICE_NAME>" --location="<REGION>" --project="<PROJECT_ID>" --quiet >/dev/null 2>&1 && \
+             gcloud agent-registry services update "<SERVICE_NAME>" \
+               --project="<PROJECT_ID>" \
+               --location="<REGION>" \
+               --display-name="<SERVICE_NAME>" \
+               --description="Deployed AI Agent on Cloud Run (<SERVICE_NAME>)" \
+               --agent-spec-type=a2a-agent-card \
+               --agent-spec-content="$(cat <AGENT_CARD_PATH>)" \
+               --interfaces='[{"protocolBinding": "http-json", "url": "'"<SERVICE_URL>"'"}]' \
+               --quiet || \
+             gcloud agent-registry services create "<SERVICE_NAME>" \
+               --project="<PROJECT_ID>" \
+               --location="<REGION>" \
+               --display-name="<SERVICE_NAME>" \
+               --description="Deployed AI Agent on Cloud Run (<SERVICE_NAME>)" \
+               --agent-spec-type=a2a-agent-card \
+               --agent-spec-content="$(cat <AGENT_CARD_PATH>)" \
+               --interfaces='[{"protocolBinding": "http-json", "url": "'"<SERVICE_URL>"'"}]' \
+               --quiet
+           ```
+         * Otherwise (standard ADK / HTTP-JSON agent):
+           ```bash
+           gcloud agent-registry services describe "<SERVICE_NAME>" --location="<REGION>" --project="<PROJECT_ID>" --quiet >/dev/null 2>&1 && \
+             gcloud agent-registry services update "<SERVICE_NAME>" \
+               --project="<PROJECT_ID>" \
+               --location="<REGION>" \
+               --display-name="<SERVICE_NAME>" \
+               --description="Deployed AI Agent on Cloud Run (<SERVICE_NAME>)" \
+               --agent-spec-type=no-spec \
+               --interfaces='[{"protocolBinding": "http-json", "url": "'"<SERVICE_URL>"'"}]' \
+               --quiet || \
+             gcloud agent-registry services create "<SERVICE_NAME>" \
+               --project="<PROJECT_ID>" \
+               --location="<REGION>" \
+               --display-name="<SERVICE_NAME>" \
+               --description="Deployed AI Agent on Cloud Run (<SERVICE_NAME>)" \
+               --agent-spec-type=no-spec \
+               --interfaces='[{"protocolBinding": "http-json", "url": "'"<SERVICE_URL>"'"}]' \
+               --quiet
+           ```
+         * For MCP Servers deployed to Cloud Run, use `--mcp-server-spec-type=no-spec` (or `--mcp-server-spec-type=tool-spec --mcp-server-spec-content="$(cat mcp-spec.json)"` if `mcp-spec.json` is present) and `--interfaces='[{"protocolBinding": "jsonrpc", "url": "'"<SERVICE_URL>"'/mcp"}]'`.
+     * **GKE Agent Registration**:
+       * In Kubernetes `Deployment` manifests for AI Agents or MCP Servers, automatically add:
+         * `metadata.labels["registry.gke.io/functional-type"]: "AGENT"` (or `"MCP_SERVER"`)
+         * `metadata.annotations["apphub.cloud.google.com/functional-type"]: "AGENT"` (or `"MCP_SERVER"`)
+         * `spec.template.metadata.annotations["iam.gke.io/spiffe-identity-type"]: "agent-identity"`
+         * (If `~/.gemini/config/skills/agent-registry/scripts/annotate_gke.py` is available locally, you may also run `python3 ~/.gemini/config/skills/agent-registry/scripts/annotate_gke.py <MANIFEST_PATH> --type AGENT`.)
+       * After `kubectl apply`, also register/update the service in Agent Registry via `gcloud agent-registry services create "<APP_NAME>" --location="<REGION>" --project="<PROJECT_ID>" ...`.
+     * **Verification**:
+       * Verify that the agent appears in Agent Registry by running:
+         ```bash
+         gcloud agent-registry agents list --location="<REGION>" --project="<PROJECT_ID>" --filter="agentId:<SERVICE_NAME>" --format="table(name.basename(),displayName,agentId,location)" --quiet
+         ```
+       * Include the registered Agent Registry resource name and `agentId` URN in the final deployment summary shown to the user.

@@ -84,6 +84,12 @@ spec:
   type: LoadBalancer
 ```
 
+### 3. Agentic Workload Labels & Annotations (AI Agents & MCP Servers)
+If the workload being deployed to GKE is an **AI Agent** or **MCP Server**, automatically add the Google Cloud Agent Registry discovery labels and annotations to the `Deployment` manifest:
+*   `metadata.labels["registry.gke.io/functional-type"]: "AGENT"` (or `"MCP_SERVER"`)
+*   `metadata.annotations["apphub.cloud.google.com/functional-type"]: "AGENT"` (or `"MCP_SERVER"`)
+*   `spec.template.metadata.annotations["iam.gke.io/spiffe-identity-type"]: "agent-identity"`
+
 ---
 
 ## Step 4: Deploy Build Artifacts
