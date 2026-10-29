@@ -238,8 +238,8 @@ Load `deployment-config.json` from the configured source control repository (**G
          gcloud agent-registry agents list --location="<REGION>" --project="<PROJECT_ID>" --filter="agentId:<SERVICE_NAME>" --format="table(name.basename(),displayName,agentId,attributes.\"agentregistry.googleapis.com/system/RuntimeReference\".uri)" --quiet
          ```
        * Include the registered Agent Registry resource name, `agentId` URN, and `RuntimeReference.uri` in the final deployment summary shown to the user.
-8. **SBOM Generation on Image Build & Binary Authorization (BinAuthz) Failure Interpretation on Production Promotion**:
-   * **SBOM Generation (Do Not Block Build/Dev Deploy)**: After building and pushing a container image to Artifact Registry via Cloud Build or Docker, generate the SPDX 2.3 SBOM (`artifactanalysis-2-3.spdx.json`) using `gcloud artifacts sbom export`. Do **NOT** enforce custom vulnerability-blocking checks during image build or `dev` deployment—supply-chain and vulnerability policy enforcement is handled by **Binary Authorization (BinAuthz)** when promoting/deploying to production (`prod`):
+8. **SBOM Generation on Image Build & Binary Authorization (BinAuthz) Enforcement/Interpretation on Cloud Run `prod`**:
+   * **SBOM Generation (Do Not Block Build/Dev Deploy)**: After building and pushing a container image to Artifact Registry via Cloud Build or Docker, generate the SPDX 2.3 SBOM (`artifactanalysis-2-3.spdx.json`) using `gcloud artifacts sbom export`. Deploy `dev` Cloud Run services **without** `--binary-authorization` so `dev` deployments are never blocked:
      ```bash
      DIGEST_URI=$(gcloud artifacts docker images describe "<IMAGE_URI>" \
        --project="<PROJECT_ID>" \
@@ -252,20 +252,44 @@ Load `deployment-config.json` from the configured source control repository (**G
        sleep 3
      done
      ```
+   * **Cloud Run `prod` Promotion Gate (Binary Authorization + Provenance & Severe Vulnerability Check)**:
+     * When deploying or promoting an image to the **Cloud Run `prod` instance** (where `binary_authorization` is `"default"` in `deployment-config.json`), always pass `--binary-authorization=default` on `gcloud run deploy` / `gcloud beta run deploy`.
+     * Before deploying to `prod`, evaluate the image digest against the Binary Authorization policy (`prod-policy`, which checks for **Google Cloud Build SLSA provenance** and **no `HIGH` or `CRITICAL` vulnerabilities**):
+       ```bash
+       EVAL_OUTPUT=$(gcloud beta container binauthz policy evaluate "${BINARY_AUTHZ_POLICY:-prod-policy}" \
+         --platform=gke \
+         --project="<PROJECT_ID>" \
+         --image="${DIGEST_URI}" \
+         --format=yaml \
+         --quiet)
+       echo "$EVAL_OUTPUT"
+       ```
+       * **If `verdict: CONFORMANT`**: Sign and attach the `prod-attestor` attestation so Cloud Run's `--binary-authorization=default` admits the `prod` deployment:
+         ```bash
+         gcloud beta container binauthz attestations sign-and-create \
+           --artifact-url="https://${DIGEST_URI}" \
+           --attestor="projects/<PROJECT_ID>/attestors/prod-attestor" \
+           --keyversion-project="<PROJECT_ID>" \
+           --keyversion-location="<REGION>" \
+           --keyversion-keyring="binauthz-keyring" \
+           --keyversion-key="prod-attestor-key" \
+           --keyversion="1" \
+           --project="<PROJECT_ID>" \
+           --quiet
+         ```
+       * **If `verdict: NON_CONFORMANT`**: Do **NOT** sign the `prod-attestor` attestation, so that deploying with `--binary-authorization=default` is blocked by Binary Authorization.
    * **Interpreting Binary Authorization (`BinAuthz`) Failures on Promotion/Deployment to Production**:
-     * If promoting or deploying an image to `prod` (via Cloud Run, GKE, or Cloud Deploy) fails due to Binary Authorization (e.g., Cloud Run `BinaryAuthorizationCheckFailed` / revision not ready, GKE `admission webhook "imagepolicywebhook.image-policy.k8s.io" denied the request`, or Cloud Deploy rollout failure), you **MUST** automatically inspect and interpret the Binary Authorization results to explain the exact cause of the block:
-       1. **Inspect BinAuthz Audit Logs & Policy Evaluation**:
+     * Whenever a `prod` deployment or promotion fails due to Binary Authorization (`verdict: NON_CONFORMANT`, Cloud Run `BinaryAuthorizationCheckFailed` / revision not ready, or Cloud Deploy rollout failure), you **MUST** automatically inspect and interpret the Binary Authorization results to explain the exact cause of the block:
+       1. **Inspect Policy Evaluation & BinAuthz Audit Logs**:
           ```bash
-          # Check Cloud Audit Logs for the exact BinAuthz policy violation message
+          # Evaluate the provenance & vulnerability checkset against the image digest
+          gcloud beta container binauthz policy evaluate "${BINARY_AUTHZ_POLICY:-prod-policy}" \
+            --platform=gke --project="<PROJECT_ID>" --image="${DIGEST_URI}" --format=yaml --quiet
+
+          # Check Cloud Audit Logs for the BinAuthz admission denial message
           gcloud logging read 'logName:"cloudaudit.googleapis.com%2Fpolicy" OR protoPayload.serviceName="binaryauthorization.googleapis.com" OR protoPayload.status.message:"Binary Authorization"' \
             --project="<PROJECT_ID>" --limit=10 --format=json --quiet
-
-          # Inspect the active Binary Authorization policy and platform policies
-          gcloud container binauthz policy export --project="<PROJECT_ID>" --quiet
-          gcloud beta container binauthz policy list --platform=cloudRun --project="<PROJECT_ID>" --quiet 2>/dev/null || true
-          gcloud beta container binauthz policy list --platform=gke --project="<PROJECT_ID>" --quiet 2>/dev/null || true
           ```
-          *(If a platform policy is configured, run `gcloud beta container binauthz policy evaluate <POLICY_ID> --platform=<cloudRun|gke> --project="<PROJECT_ID>" --image="${DIGEST_URI}" --quiet` to retrieve the structured checkset evaluation result.)*
        2. **Cross-Check Attestations, Provenance, and Vulnerability Findings on the Image Digest**:
           ```bash
           # Check existing BinAuthz attestations on the image digest
@@ -277,5 +301,6 @@ Load `deployment-config.json` from the configured source control repository (**G
             --project="<PROJECT_ID>" --quiet
           ```
        3. **Explain the Root Cause Clearly to the User**:
-          * Identify **which policy rule or check failed** (e.g., missing required attestation from attestor `<ATTESTOR_NAME>`, `DISALLOW_ALL` default rule, untrusted registry/image path, unverified SLSA build provenance, or CVSS vulnerability threshold violation).
-          * If blocked by vulnerability or attestation requirements, list the specific missing attestor(s) or the offending CVEs (`package`, `installedVersion`, `fixedVersion`, `severity`, `cvssScore`) and provide actionable remediation steps.
+          * Identify **which check failed**:
+            * `SlsaCheck` (`Require Google Cloud Build SLSA Provenance`): Explain whether the image is missing verified Cloud Build provenance (`provenance_summary: null` or built outside Cloud Build).
+            * `VulnerabilityCheck` (`Block HIGH and CRITICAL Vulnerabilities`): State how many vulnerabilities violated the `MEDIUM` threshold (`HIGH` / `CRITICAL` CVEs) and list the offending CVEs (`package`, `installedVersion`, `fixedVersion`, `severity`, `cvssScore`) along with remediation steps.
