@@ -108,10 +108,10 @@ Your job is to deploy the user's applications to Cloud Run from an image.
     *   Check existence: `gcloud artifacts repositories describe <REPO_NAME> --location=<REGION> --project=<PROJECT_ID>`
     *   Create if missing: `gcloud artifacts repositories create <REPO_NAME> --repository-format=docker --location=<REGION> --project=<PROJECT_ID>`
     *   If a dedicated service account is specified, grant writer permissions: `gcloud projects add-iam-policy-binding <PROJECT_ID> --member="serviceAccount:<SERVICE_ACCOUNT_EMAIL>" --role="roles/artifactregistry.writer"`
-4.  **Build and Push Image (with Automatic Vulnerability Scan & SBOM Export)**: Build the Docker image and push it to the created Artifact Registry repository. First check if a local Docker daemon is running (`command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1`):
+4.  **Build and Push Image (with SBOM Generation)**: Build the Docker image and push it to the created Artifact Registry repository. First check if a local Docker daemon is running (`command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1`):
     *   **If local Docker daemon is running**: Configure Docker authentication (`gcloud auth configure-docker <REGION>-docker.pkg.dev --quiet`) and use the Docker CLI to build the image locally and push it.
     *   **If local Docker daemon is NOT available** (or if the local build fails): Immediately use Google Cloud Build to build and push the image remotely by running `gcloud builds submit --tag <IMAGE_URI> . --project=<PROJECT_ID>` in the project root.
-    *   **Generate & Export SBOM**: Once the image is pushed to Artifact Registry (which automatically triggers Artifact Analysis vulnerability scanning when `containerscanning.googleapis.com` is enabled), you **MUST** generate and export the SPDX 2.3 SBOM using `gcloud artifacts sbom export` per **Rule 8**.
+    *   **Generate SBOM**: Once the image is pushed to Artifact Registry, generate the SPDX 2.3 SBOM using `gcloud artifacts sbom export` per **Rule 8**.
 5.  **Gather Parameters**: Analyze the request to find all necessary parameters to deploy to Google Cloud Run(e.g., `repo_name: "my-app-images"`).
 6.  **Clarify if Needed**: If any mandatory parameters are missing to deploy to Google Cloud Run, you MUST ask the user for them before proceeding. Do not guess or make assumptions. Ask the user if they would like to create a public or private service if not specified.
 7.  **Deploy**: Deploy the built application to Google Cloud Run and return the URL of the deployed application:
@@ -143,7 +143,7 @@ This workflow is for deploying container-based applications to a GKE cluster. Co
 4.  **Create Artifact Registry Repository**: Check if the Artifact Registry repository already exists, and create it if it does not using `gcloud`:
     *   Check existence: `gcloud artifacts repositories describe <REPO_NAME> --location=<REGION> --project=<PROJECT_ID>`
     *   Create if missing: `gcloud artifacts repositories create <REPO_NAME> --repository-format=docker --location=<REGION> --project=<PROJECT_ID>`
-5.  **Build and Push Image (with Automatic Vulnerability Scan & SBOM Export)**: Check if a local Docker daemon is running (`command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1`). If available, use the Docker CLI to build and push the image; otherwise immediately use `gcloud builds submit --tag <IMAGE_URI> . --project=<PROJECT_ID>` to build and push the image to the created Artifact Registry repository. Once pushed, generate and export the SPDX 2.3 SBOM using `gcloud artifacts sbom export` per **Rule 8**.
+5.  **Build and Push Image (with SBOM Generation)**: Check if a local Docker daemon is running (`command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1`). If available, use the Docker CLI to build and push the image; otherwise immediately use `gcloud builds submit --tag <IMAGE_URI> . --project=<PROJECT_ID>` to build and push the image to the created Artifact Registry repository. Once pushed, generate the SPDX 2.3 SBOM using `gcloud artifacts sbom export` per **Rule 8**.
 6.  **Manifest Preparation**: Check for existing Kubernetes manifests (e.g., `deployment.yaml`, `service.yaml`) in the project. If they don't exist, ask the user if they would like to create a public or private service. Then generate a standard `Deployment` and a corresponding `Service` manifest (e.g., `LoadBalancer` for public, `ClusterIP` for private). Ensure the manifests use the correct image URI from Step 5, the correct container port from Step 2, and have appropriate resource limits and labels.
     *   **If the application is an AI Agent or MCP Server**: Automatically annotate and label the `Deployment` manifest for native GKE Agent Registry discovery (`registry.gke.io/functional-type: "AGENT"` and `apphub.cloud.google.com/functional-type: "AGENT"` — or `"MCP_SERVER"` — plus `iam.gke.io/spiffe-identity-type: "agent-identity"` on the Pod template) per **Rule 7**.
 7.  **Deploy to GKE**: Deploy the built application to the GKE cluster by following the detailed authentication and deployment procedures in `references/how_to_deploy_to_gke_with_kubectl.md`.
@@ -238,9 +238,8 @@ Load `deployment-config.json` from the configured source control repository (**G
          gcloud agent-registry agents list --location="<REGION>" --project="<PROJECT_ID>" --filter="agentId:<SERVICE_NAME>" --format="table(name.basename(),displayName,agentId,attributes.\"agentregistry.googleapis.com/system/RuntimeReference\".uri)" --quiet
          ```
        * Include the registered Agent Registry resource name, `agentId` URN, and `RuntimeReference.uri` in the final deployment summary shown to the user.
-8. **Mandatory SBOM Generation & Artifact Analysis Vulnerability Scanning**:
-   * **Automatic Scan on Push**: Ensure `containerscanning.googleapis.com` and `containeranalysis.googleapis.com` are enabled on `<PROJECT_ID>` (`gcloud services enable containerscanning.googleapis.com containeranalysis.googleapis.com --project="<PROJECT_ID>" --quiet`). When enabled, Artifact Analysis automatically scans every container image pushed to Artifact Registry for OS, language-package (`PYPI`, `NPM`, `GO`, `MAVEN`, etc.), and secret vulnerabilities, creating a `DISCOVERY` occurrence.
-   * **Mandatory SPDX 2.3 SBOM Export**: Because Artifact Analysis only exports the signed SPDX 2.3 SBOM (`artifactanalysis-2-3.spdx.json`) to Cloud Storage and creates the `SBOM_REFERENCE` occurrence when explicitly triggered, you **MUST** run `gcloud artifacts sbom export` for every container image built and pushed via Cloud Build or Docker:
+8. **SBOM Generation on Image Build & Binary Authorization (BinAuthz) Failure Interpretation on Production Promotion**:
+   * **SBOM Generation (Do Not Block Build/Dev Deploy)**: After building and pushing a container image to Artifact Registry via Cloud Build or Docker, generate the SPDX 2.3 SBOM (`artifactanalysis-2-3.spdx.json`) using `gcloud artifacts sbom export`. Do **NOT** enforce custom vulnerability-blocking checks during image build or `dev` deployment—supply-chain and vulnerability policy enforcement is handled by **Binary Authorization (BinAuthz)** when promoting/deploying to production (`prod`):
      ```bash
      DIGEST_URI=$(gcloud artifacts docker images describe "<IMAGE_URI>" \
        --project="<PROJECT_ID>" \
@@ -252,10 +251,31 @@ Load `deployment-config.json` from the configured source control repository (**G
        gcloud artifacts sbom export --uri="${DIGEST_URI}" --project="<PROJECT_ID>" --quiet && break
        sleep 3
      done
-
-     gcloud artifacts sbom list \
-       --resource-prefix="https://${DIGEST_URI}" \
-       --project="<PROJECT_ID>" \
-       --quiet
      ```
-   * **Reporting**: Always include the exported SBOM Cloud Storage location (`gs://artifactanalysis-.../sbom/artifactanalysis-2-3.spdx.json`) and the Artifact Analysis scan status (`gcloud artifacts docker images describe "${DIGEST_URI}" --show-package-vulnerability --format="value(discovery_summary.discovery[0].discovery.analysisStatus)" --quiet`) in the final deployment summary presented to the user.
+   * **Interpreting Binary Authorization (`BinAuthz`) Failures on Promotion/Deployment to Production**:
+     * If promoting or deploying an image to `prod` (via Cloud Run, GKE, or Cloud Deploy) fails due to Binary Authorization (e.g., Cloud Run `BinaryAuthorizationCheckFailed` / revision not ready, GKE `admission webhook "imagepolicywebhook.image-policy.k8s.io" denied the request`, or Cloud Deploy rollout failure), you **MUST** automatically inspect and interpret the Binary Authorization results to explain the exact cause of the block:
+       1. **Inspect BinAuthz Audit Logs & Policy Evaluation**:
+          ```bash
+          # Check Cloud Audit Logs for the exact BinAuthz policy violation message
+          gcloud logging read 'logName:"cloudaudit.googleapis.com%2Fpolicy" OR protoPayload.serviceName="binaryauthorization.googleapis.com" OR protoPayload.status.message:"Binary Authorization"' \
+            --project="<PROJECT_ID>" --limit=10 --format=json --quiet
+
+          # Inspect the active Binary Authorization policy and platform policies
+          gcloud container binauthz policy export --project="<PROJECT_ID>" --quiet
+          gcloud beta container binauthz policy list --platform=cloudRun --project="<PROJECT_ID>" --quiet 2>/dev/null || true
+          gcloud beta container binauthz policy list --platform=gke --project="<PROJECT_ID>" --quiet 2>/dev/null || true
+          ```
+          *(If a platform policy is configured, run `gcloud beta container binauthz policy evaluate <POLICY_ID> --platform=<cloudRun|gke> --project="<PROJECT_ID>" --image="${DIGEST_URI}" --quiet` to retrieve the structured checkset evaluation result.)*
+       2. **Cross-Check Attestations, Provenance, and Vulnerability Findings on the Image Digest**:
+          ```bash
+          # Check existing BinAuthz attestations on the image digest
+          gcloud container binauthz attestations list --artifact-url="https://${DIGEST_URI}" --project="<PROJECT_ID>" --quiet
+
+          # Check SLSA build provenance and package vulnerability scan results
+          gcloud artifacts docker images describe "${DIGEST_URI}" \
+            --show-provenance --show-package-vulnerability \
+            --project="<PROJECT_ID>" --quiet
+          ```
+       3. **Explain the Root Cause Clearly to the User**:
+          * Identify **which policy rule or check failed** (e.g., missing required attestation from attestor `<ATTESTOR_NAME>`, `DISALLOW_ALL` default rule, untrusted registry/image path, unverified SLSA build provenance, or CVSS vulnerability threshold violation).
+          * If blocked by vulnerability or attestation requirements, list the specific missing attestor(s) or the offending CVEs (`package`, `installedVersion`, `fixedVersion`, `severity`, `cvssScore`) and provide actionable remediation steps.

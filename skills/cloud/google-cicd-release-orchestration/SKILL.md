@@ -205,3 +205,14 @@ Get the release to determine which of the target renders failed and inspect the 
 #### Rollout failed
 
 Get the rollout to determine which of the jobs failed and inspect the failure message and failure cause. Additionally the `Rollout` contains a Cloud Build reference where the failed job was executed. Retrieve the build logs to determine the root cause of the failure.
+
+* **Binary Authorization (`BinAuthz`) Failure Interpretation on Promotion to Production**:
+  If a rollout or promotion to `prod` fails because Binary Authorization blocked the image (e.g., Cloud Run `BinaryAuthorizationCheckFailed` or GKE `imagepolicywebhook.image-policy.k8s.io` admission denial), automatically inspect and interpret the Binary Authorization evaluation results for the user:
+  1. Check Cloud Audit Logs for the exact BinAuthz denial reason:
+     ```bash
+     gcloud logging read 'logName:"cloudaudit.googleapis.com%2Fpolicy" OR protoPayload.serviceName="binaryauthorization.googleapis.com" OR protoPayload.status.message:"Binary Authorization"' \
+       --project=<PROJECT_ID> --limit=10 --format=json --quiet
+     ```
+  2. Inspect the active Binary Authorization policy and platform policies (`gcloud container binauthz policy export --project=<PROJECT_ID>` and `gcloud beta container binauthz policy list --platform=<cloudRun|gke> --project=<PROJECT_ID>`), and if a platform policy is used, evaluate it against the image digest (`gcloud beta container binauthz policy evaluate <POLICY_ID> --platform=<cloudRun|gke> --project=<PROJECT_ID> --image=<DIGEST_URI>`).
+  3. Cross-check existing attestations (`gcloud container binauthz attestations list --artifact-url="https://<DIGEST_URI>" --project=<PROJECT_ID>`) and Artifact Analysis provenance/vulnerability findings (`gcloud artifacts docker images describe <DIGEST_URI> --show-provenance --show-package-vulnerability --project=<PROJECT_ID>`).
+  4. Clearly explain which policy rule, missing attestation (`<ATTESTOR_NAME>`), provenance check, or CVE severity threshold blocked the promotion and provide actionable remediation steps.
