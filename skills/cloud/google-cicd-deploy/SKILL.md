@@ -108,9 +108,10 @@ Your job is to deploy the user's applications to Cloud Run from an image.
     *   Check existence: `gcloud artifacts repositories describe <REPO_NAME> --location=<REGION> --project=<PROJECT_ID>`
     *   Create if missing: `gcloud artifacts repositories create <REPO_NAME> --repository-format=docker --location=<REGION> --project=<PROJECT_ID>`
     *   If a dedicated service account is specified, grant writer permissions: `gcloud projects add-iam-policy-binding <PROJECT_ID> --member="serviceAccount:<SERVICE_ACCOUNT_EMAIL>" --role="roles/artifactregistry.writer"`
-4.  **Build and Push Image**: Build the Docker image and push it to the created Artifact Registry repository. First check if a local Docker daemon is running (`command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1`):
+4.  **Build and Push Image (with Automatic Vulnerability Scan & SBOM Export)**: Build the Docker image and push it to the created Artifact Registry repository. First check if a local Docker daemon is running (`command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1`):
     *   **If local Docker daemon is running**: Configure Docker authentication (`gcloud auth configure-docker <REGION>-docker.pkg.dev --quiet`) and use the Docker CLI to build the image locally and push it.
     *   **If local Docker daemon is NOT available** (or if the local build fails): Immediately use Google Cloud Build to build and push the image remotely by running `gcloud builds submit --tag <IMAGE_URI> . --project=<PROJECT_ID>` in the project root.
+    *   **Generate & Export SBOM**: Once the image is pushed to Artifact Registry (which automatically triggers Artifact Analysis vulnerability scanning when `containerscanning.googleapis.com` is enabled), you **MUST** generate and export the SPDX 2.3 SBOM using `gcloud artifacts sbom export` per **Rule 8**.
 5.  **Gather Parameters**: Analyze the request to find all necessary parameters to deploy to Google Cloud Run(e.g., `repo_name: "my-app-images"`).
 6.  **Clarify if Needed**: If any mandatory parameters are missing to deploy to Google Cloud Run, you MUST ask the user for them before proceeding. Do not guess or make assumptions. Ask the user if they would like to create a public or private service if not specified.
 7.  **Deploy**: Deploy the built application to Google Cloud Run and return the URL of the deployed application:
@@ -142,7 +143,7 @@ This workflow is for deploying container-based applications to a GKE cluster. Co
 4.  **Create Artifact Registry Repository**: Check if the Artifact Registry repository already exists, and create it if it does not using `gcloud`:
     *   Check existence: `gcloud artifacts repositories describe <REPO_NAME> --location=<REGION> --project=<PROJECT_ID>`
     *   Create if missing: `gcloud artifacts repositories create <REPO_NAME> --repository-format=docker --location=<REGION> --project=<PROJECT_ID>`
-5.  **Build and Push Image**: Check if a local Docker daemon is running (`command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1`). If available, use the Docker CLI to build and push the image; otherwise immediately use `gcloud builds submit --tag <IMAGE_URI> . --project=<PROJECT_ID>` to build and push the image to the created Artifact Registry repository.
+5.  **Build and Push Image (with Automatic Vulnerability Scan & SBOM Export)**: Check if a local Docker daemon is running (`command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1`). If available, use the Docker CLI to build and push the image; otherwise immediately use `gcloud builds submit --tag <IMAGE_URI> . --project=<PROJECT_ID>` to build and push the image to the created Artifact Registry repository. Once pushed, generate and export the SPDX 2.3 SBOM using `gcloud artifacts sbom export` per **Rule 8**.
 6.  **Manifest Preparation**: Check for existing Kubernetes manifests (e.g., `deployment.yaml`, `service.yaml`) in the project. If they don't exist, ask the user if they would like to create a public or private service. Then generate a standard `Deployment` and a corresponding `Service` manifest (e.g., `LoadBalancer` for public, `ClusterIP` for private). Ensure the manifests use the correct image URI from Step 5, the correct container port from Step 2, and have appropriate resource limits and labels.
     *   **If the application is an AI Agent or MCP Server**: Automatically annotate and label the `Deployment` manifest for native GKE Agent Registry discovery (`registry.gke.io/functional-type: "AGENT"` and `apphub.cloud.google.com/functional-type: "AGENT"` — or `"MCP_SERVER"` — plus `iam.gke.io/spiffe-identity-type: "agent-identity"` on the Pod template) per **Rule 7**.
 7.  **Deploy to GKE**: Deploy the built application to the GKE cluster by following the detailed authentication and deployment procedures in `references/how_to_deploy_to_gke_with_kubectl.md`.
@@ -201,9 +202,10 @@ Load `deployment-config.json` from the configured source control repository (**G
      *(Only fall back to `default_branch` in `deployment-config.json` with `^` and `$` stripped if the remote `HEAD` ref cannot be resolved.)*
    * Automatically link the repository to Developer Connect using `gcloud developer-connect connections git-repository-links create` under the configured `developer_connect.connection_id`.
    * Create or run the Cloud Build trigger using `gcloud builds triggers create developer-connect` (or `gcloud beta builds triggers create developer-connect`) and `gcloud builds triggers run` with the pre-configured dedicated `cloud_build_trigger.service_account`:
-     * **Mandatory `CLOUD_LOGGING_ONLY` with Custom Service Accounts**: Whenever a dedicated `--service-account` is used, Cloud Build requires `options: { logging: CLOUD_LOGGING_ONLY }` in the build config; omitting it causes `INVALID_ARGUMENT`.
-     * **Remote File Check (`--build-config` vs. `--inline-config`)**: Check if `cloudbuild.yaml` and `Dockerfile` exist on `origin/${DEFAULT_BRANCH}` (`git ls-tree "origin/${DEFAULT_BRANCH}" cloudbuild.yaml Dockerfile`). If either file is missing on `origin/${DEFAULT_BRANCH}` (for example, generated locally and not pushed to remote source control), immediately create/update the trigger with `--inline-config=<INLINE_CLOUDBUILD_YAML>` (including `options: { logging: CLOUD_LOGGING_ONLY }` and writing `Dockerfile` inline if missing on the remote branch) so the first trigger run succeeds without `FAILED_PRECONDITION: Couldn't read commit`.
+     * **Mandatory `CLOUD_LOGGING_ONLY` & Build Provenance (`requestedVerifyOption: VERIFIED`)**: Whenever a dedicated `--service-account` is used, Cloud Build requires `options: { logging: CLOUD_LOGGING_ONLY }` in the build config; omitting it causes `INVALID_ARGUMENT`. Always list pushed images under top-level `images:` and set `requestedVerifyOption: VERIFIED` in `options:` so Cloud Build generates verified SLSA build provenance alongside the image push.
+     * **Remote File Check (`--build-config` vs. `--inline-config`)**: Check if `cloudbuild.yaml` and `Dockerfile` exist on `origin/${DEFAULT_BRANCH}` (`git ls-tree "origin/${DEFAULT_BRANCH}" cloudbuild.yaml Dockerfile`). If either file is missing on `origin/${DEFAULT_BRANCH}` (for example, generated locally and not pushed to remote source control), immediately create/update the trigger with `--inline-config=<INLINE_CLOUDBUILD_YAML>` (including `images:` and `options: { logging: CLOUD_LOGGING_ONLY, requestedVerifyOption: VERIFIED }` and writing `Dockerfile` inline if missing on the remote branch) so the first trigger run succeeds without `FAILED_PRECONDITION: Couldn't read commit`.
      * **Important (`--branch-pattern` vs. `--branch`)**: Pass `--branch-pattern="^${DEFAULT_BRANCH}$"` when creating the trigger, and pass the literal remote default branch name `--branch="${DEFAULT_BRANCH}"` (never with `^` or `$` regex anchors) when running `gcloud builds triggers run <TRIGGER_ID> --branch="${DEFAULT_BRANCH}"`.
+   * Immediately after the Cloud Build image push completes, export and verify the SPDX SBOM for the pushed image digest per **Rule 8** before or alongside deploying to Cloud Run or GKE.
    * Use the resulting Artifact Registry image for subsequent Cloud Run or GKE deployments.
    * For 3rd-party public sample repositories (which are outside the user's Developer Connect permissions), clone and build directly.
 6. **Google Cloud CLI Fallback**:
@@ -236,3 +238,24 @@ Load `deployment-config.json` from the configured source control repository (**G
          gcloud agent-registry agents list --location="<REGION>" --project="<PROJECT_ID>" --filter="agentId:<SERVICE_NAME>" --format="table(name.basename(),displayName,agentId,attributes.\"agentregistry.googleapis.com/system/RuntimeReference\".uri)" --quiet
          ```
        * Include the registered Agent Registry resource name, `agentId` URN, and `RuntimeReference.uri` in the final deployment summary shown to the user.
+8. **Mandatory SBOM Generation & Artifact Analysis Vulnerability Scanning**:
+   * **Automatic Scan on Push**: Ensure `containerscanning.googleapis.com` and `containeranalysis.googleapis.com` are enabled on `<PROJECT_ID>` (`gcloud services enable containerscanning.googleapis.com containeranalysis.googleapis.com --project="<PROJECT_ID>" --quiet`). When enabled, Artifact Analysis automatically scans every container image pushed to Artifact Registry for OS, language-package (`PYPI`, `NPM`, `GO`, `MAVEN`, etc.), and secret vulnerabilities, creating a `DISCOVERY` occurrence.
+   * **Mandatory SPDX 2.3 SBOM Export**: Because Artifact Analysis only exports the signed SPDX 2.3 SBOM (`artifactanalysis-2-3.spdx.json`) to Cloud Storage and creates the `SBOM_REFERENCE` occurrence when explicitly triggered, you **MUST** run `gcloud artifacts sbom export` for every container image built and pushed via Cloud Build or Docker:
+     ```bash
+     DIGEST_URI=$(gcloud artifacts docker images describe "<IMAGE_URI>" \
+       --project="<PROJECT_ID>" \
+       --format="value(image_summary.fully_qualified_digest)" \
+       --quiet)
+
+     # Wait briefly if the automatic push DISCOVERY occurrence is still initializing, then export SBOM
+     for i in 1 2 3 4 5; do
+       gcloud artifacts sbom export --uri="${DIGEST_URI}" --project="<PROJECT_ID>" --quiet && break
+       sleep 3
+     done
+
+     gcloud artifacts sbom list \
+       --resource-prefix="https://${DIGEST_URI}" \
+       --project="<PROJECT_ID>" \
+       --quiet
+     ```
+   * **Reporting**: Always include the exported SBOM Cloud Storage location (`gs://artifactanalysis-.../sbom/artifactanalysis-2-3.spdx.json`) and the Artifact Analysis scan status (`gcloud artifacts docker images describe "${DIGEST_URI}" --show-package-vulnerability --format="value(discovery_summary.discovery[0].discovery.analysisStatus)" --quiet`) in the final deployment summary presented to the user.
