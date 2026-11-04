@@ -19,7 +19,7 @@ RUN curl -L https://github.com/mikefarah/yq/releases/download/v4.45.1/yq_linux_a
 
 # gcloud + kubectl + gke-gcloud-auth-plugin
 RUN curl -sSL https://sdk.cloud.google.com | bash && \
-    /root/google-cloud-sdk/bin/gcloud components install kubectl gke-gcloud-auth-plugin --quiet
+    /root/google-cloud-sdk/bin/gcloud components install kubectl gke-gcloud-auth-plugin beta --quiet
 ENV PATH=${PATH}:/root/google-cloud-sdk/bin
 
 # Terraform
@@ -28,19 +28,26 @@ RUN curl -LO https://releases.hashicorp.com/terraform/1.14.8/terraform_1.14.8_li
     && mv terraform /usr/local/bin/ \
     && rm terraform_1.14.8_linux_amd64.zip
 
-# Gemini CLI
-RUN npm install -g @google/gemini-cli
+# Multi-Model Agent CLIs: Gemini CLI, Anthropic Claude Code, and OpenAI Codex CLI
+RUN npm install -g @google/gemini-cli @anthropic-ai/claude-code @openai/codex
 
 ENTRYPOINT []
 
-# Stage 2: Final Eval Image (gcloud-native CI/CD skills, no local MCP server)
+# Stage 2: Final Eval Image (Multi-model gcloud-native CI/CD skills for Gemini, OpenAI, and Claude)
 FROM base-builder AS eval-docker-provider
 
-RUN mkdir -p /root/.gemini/skills
+RUN mkdir -p /root/.gemini/skills /root/.claude/skills /root/.agents/skills /root/.codex/skills
+
+# Install skills for Gemini
 COPY skills/cloud/google-cicd-deploy /root/.gemini/skills/google-cicd-deploy
 COPY skills/cloud/google-cicd-pipeline-design /root/.gemini/skills/google-cicd-pipeline-design
 COPY skills/cloud/google-cicd-release-orchestration /root/.gemini/skills/google-cicd-release-orchestration
 COPY skills/cloud/google-cicd-terraform /root/.gemini/skills/google-cicd-terraform
+
+# Mirror skills for Claude Code (~/.claude/skills) and OpenAI Codex / Cross-Agent (~/.agents/skills & ~/.codex/skills)
+RUN cp -r /root/.gemini/skills/* /root/.claude/skills/ && \
+    cp -r /root/.gemini/skills/* /root/.agents/skills/ && \
+    cp -r /root/.gemini/skills/* /root/.codex/skills/
 
 RUN printf '%b' '{\n\
   "/": "TRUST_PARENT"\n\

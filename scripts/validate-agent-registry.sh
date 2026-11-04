@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # Deterministic grader for Agent Registry auto-registration on Cloud Run or GKE
-# Covers Prompt #1 (Agentic workloads in Scenarios #1 & #2) and Prompt #3 (IDE-generated Agents).
+# Covers Prompt #1 (Agentic & MCP Server workloads in Scenarios #1, #2, #4) and Prompt #3.
 
 set -u
 
 RUNTIME="${1:-run}"
 TARGET_NAME="${2:-}"
 WORKSPACE_DIR="${3:-.}"
+EXPECTED_TYPE="${4:-agent}" # "agent" or "mcp-server"
 PROJECT_ID="${PROJECT_ID:-${PROJECT_NAME:-}}"
 REGION="${REGION:-us-central1}"
 
@@ -23,11 +24,20 @@ if [ "$RUNTIME" = "run" ]; then
       --format=json \
       --quiet 2>/dev/null || true)
 
-    if echo "$SVC_JSON" | grep -qiE "agent|mcp-server|agent-identity"; then
-      CHECK_RUNTIME_ATTR="true"
-      MSG_RUNTIME_ATTR="Cloud Run service '$TARGET_NAME' configured with native functional-type/agent-identity"
+    if [ "$EXPECTED_TYPE" = "mcp-server" ]; then
+      if echo "$SVC_JSON" | grep -qiE "mcp-server|mcp_server"; then
+        CHECK_RUNTIME_ATTR="true"
+        MSG_RUNTIME_ATTR="Cloud Run service '$TARGET_NAME' configured with --functional-type=mcp-server"
+      else
+        MSG_RUNTIME_ATTR="Cloud Run service '$TARGET_NAME' missing --functional-type=mcp-server"
+      fi
     else
-      MSG_RUNTIME_ATTR="Cloud Run service '$TARGET_NAME' missing --functional-type=agent or --identity-type=agent-identity"
+      if echo "$SVC_JSON" | grep -qiE "agent|agent-identity"; then
+        CHECK_RUNTIME_ATTR="true"
+        MSG_RUNTIME_ATTR="Cloud Run service '$TARGET_NAME' configured with native functional-type=agent / agent-identity"
+      else
+        MSG_RUNTIME_ATTR="Cloud Run service '$TARGET_NAME' missing --functional-type=agent or --identity-type=agent-identity"
+      fi
     fi
 
     AR_OUT=$(gcloud agent-registry agents list \
@@ -37,19 +47,34 @@ if [ "$RUNTIME" = "run" ]; then
       --format="value(agentId)" \
       --quiet 2>/dev/null || true)
 
+    if [ -z "$AR_OUT" ] && [ "$EXPECTED_TYPE" = "mcp-server" ]; then
+      AR_OUT=$(gcloud agent-registry mcp-servers list \
+        --location="$REGION" \
+        --project="$PROJECT_ID" \
+        --filter="mcpServerId:$TARGET_NAME" \
+        --format="value(mcpServerId)" \
+        --quiet 2>/dev/null || true)
+    fi
+
     if [ -n "$AR_OUT" ]; then
       CHECK_AGENT_REGISTRY="true"
-      MSG_AGENT_REGISTRY="Agent '$TARGET_NAME' verified in Google Cloud Agent Registry ($AR_OUT)"
+      MSG_AGENT_REGISTRY="Workload '$TARGET_NAME' verified in Google Cloud Agent Registry ($AR_OUT)"
     else
-      MSG_AGENT_REGISTRY="Agent '$TARGET_NAME' not found in gcloud agent-registry agents list"
+      MSG_AGENT_REGISTRY="Workload '$TARGET_NAME' not found in Google Cloud Agent Registry"
     fi
   else
     MSG_RUNTIME_ATTR="Missing PROJECT_ID or TARGET_NAME"
     MSG_AGENT_REGISTRY="Missing PROJECT_ID or TARGET_NAME"
   fi
 elif [ "$RUNTIME" = "gke" ]; then
-  if grep -rnqE 'registry\.gke\.io/functional-type.*(AGENT|MCP_SERVER)' "$WORKSPACE_DIR" 2>/dev/null && \
-     grep -rnqE 'apphub\.cloud\.google\.com/functional-type.*(AGENT|MCP_SERVER)' "$WORKSPACE_DIR" 2>/dev/null && \
+  if [ "$EXPECTED_TYPE" = "mcp-server" ]; then
+    GKE_TYPE_PATTERN="MCP_SERVER"
+  else
+    GKE_TYPE_PATTERN="(AGENT|MCP_SERVER)"
+  fi
+
+  if grep -rnqE "registry\.gke\.io/functional-type.*${GKE_TYPE_PATTERN}" "$WORKSPACE_DIR" 2>/dev/null && \
+     grep -rnqE "apphub\.cloud\.google\.com/functional-type.*${GKE_TYPE_PATTERN}" "$WORKSPACE_DIR" 2>/dev/null && \
      grep -rnqE 'iam\.gke\.io/spiffe-identity-type.*agent-identity' "$WORKSPACE_DIR" 2>/dev/null; then
     CHECK_RUNTIME_ATTR="true"
     MSG_RUNTIME_ATTR="GKE manifests contain registry.gke.io/functional-type, apphub.cloud.google.com/functional-type, and iam.gke.io/spiffe-identity-type"

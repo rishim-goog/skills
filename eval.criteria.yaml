@@ -12,18 +12,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-# Evaluation suite generated from criteria in:
+# Multi-Model CI/CD Evaluation Suite (Gemini, OpenAI / Codex, and Anthropic Claude)
+# Generated from criteria in:
 # https://docs.google.com/document/d/1gU2q34j0p8aQGxPiK094x4Tz65gblvDCZMXG2l42urY/edit
 #
-# Run full suite:
+# Run across all 3 model families (Gemini, Claude, OpenAI Codex):
+#   ./scripts/run-multi-model-evals.sh --models gemini,claude,codex
+# Run with a single model provider:
+#   ./scripts/run-multi-model-evals.sh --models claude --eval prompt1-scenario1-app-cloud-run-devconnect
+#   ./scripts/run-multi-model-evals.sh --models codex  --eval prompt1-scenario1-app-cloud-run-devconnect
 #   skillgrade --config=eval.criteria.yaml --no-redact --save-trial-workspace
-# Run a single eval task:
-#   skillgrade --config=eval.criteria.yaml --no-redact --save-trial-workspace --eval=prompt1-scenario1-app-cloud-run-devconnect
 
 version: "1"
 
 defaults:
-  agent: gemini
+  agent: gemini # Override via ./scripts/run-multi-model-evals.sh --models gemini,claude,codex
   provider: docker
   trials: 1
   timeout: 600
@@ -37,7 +40,13 @@ defaults:
     - src: scripts
       dest: /workspace/scripts
     - src: scripts/BASE_GEMINI.md
-      dest: $HOME/.gemini/GEMINI.md
+      dest: /root/.gemini/GEMINI.md
+    - src: scripts/BASE_GEMINI.md
+      dest: /root/.claude/CLAUDE.md
+    - src: scripts/BASE_GEMINI.md
+      dest: /root/.agents/AGENTS.md
+    - src: scripts/BASE_GEMINI.md
+      dest: /root/.codex/AGENTS.md
   environment:
     mounts:
       - ~/.config/gcloud/application_default_credentials.json:/tmp/keys/adc.json:ro
@@ -52,14 +61,6 @@ tasks:
   # ============================================================================
 
   # Prompt #1 - Scenario #1A (Standard Application -> Cloud Run via deployment-config.json)
-  # Criteria:
-  # - Configuration already exists in deployment-config.json for DevConnect, Cloud Build,
-  #   and Artifact Registry; Cloud Run is the preferred runtime of choice.
-  # - Agent reads config from Git repo, links/pulls via Developer Connect, builds via
-  #   Cloud Build, pushes to Artifact Registry (with SBOM export), and deploys to Cloud Run.
-  # - Agent MUST NOT prompt user for pre-configured variables in deployment-config.json.
-  # - Weighted deduction if any service is skipped; skipping Artifact Registry has the
-  #   highest penalty (enforced via scripts/validate-weighted-cicd-services.py).
   - name: prompt1-scenario1-app-cloud-run-devconnect
     instruction: |
       Build and deploy the application located in https://github.com/sdlc-graph/chefs-companion.git to my GCP development environment.
@@ -69,6 +70,7 @@ tasks:
 
     trialConfig:
       setup: |
+        scripts/setup_gcloud.sh
         git clone -b no-dockerfile https://github.com/sdlc-graph/chefs-companion.git /workspace/chefs-companion
         mkdir -p /workspace/config-repo
         cat <<EOF > /workspace/config-repo/deployment-config.json
@@ -117,7 +119,7 @@ tasks:
 
     graders:
       - type: deterministic
-        weight: 0.35
+        weight: 0.40
         run: scripts/validate-cloud-run-deployment.sh app-p1s1-${_EVAL_UUID}-${_EVAL_TRIAL}
       - type: deterministic
         weight: 0.35
@@ -131,15 +133,8 @@ tasks:
       - type: deterministic
         weight: 0.10
         run: /workspace/scripts/validate-sbom-and-binauthz.sh dev app-p1s1-${_EVAL_UUID}-${_EVAL_TRIAL}
-      - type: tool_usage
-        weight: 0.10
-        expectedTools:
-          - name: activate_skill
-            args:
-              name: google-cicd-deploy
-          - name: run_shell_command
       - type: llm_rubric
-        weight: 0.10
+        weight: 0.15
         outcome_assertions:
           - The agent must load deployment-config.json and persist it in .gcp-deploy/deployment-config.json without prompting the user for pre-configured variables (project_id, region, artifact_registry, service_name, connection_id, or service_account).
           - The agent must scan the codebase for secrets using CLI commands before building or deploying.
@@ -147,10 +142,6 @@ tasks:
           - The agent must prefix gcloud commands with CLOUDSDK_METRICS_REQUEST_ATTRIBUTION="agent-skills/1.0 (skill:google-cicd-deploy)".
 
   # Prompt #1 - Scenario #1B (Agentic Workload -> Cloud Run + Automatic Agent Registry Registration)
-  # Criteria:
-  # - Same as Scenario #1, plus in agentic usage, the deployed AI Agent is automatically
-  #   registered with Google Cloud Agent Registry via native Cloud Run flags
-  #   (--functional-type=agent --identity-type=agent-identity).
   - name: prompt1-scenario1-agent-cloud-run-agent-registry
     instruction: |
       Build and deploy the agent located in /workspace/adk-sample-agent to my GCP development environment.
@@ -160,6 +151,7 @@ tasks:
 
     trialConfig:
       setup: |
+        scripts/setup_gcloud.sh
         mkdir -p /workspace/adk-sample-agent
         cat <<'EOF' > /workspace/adk-sample-agent/requirements.txt
         google-adk>=0.1.0
@@ -232,8 +224,8 @@ tasks:
         weight: 0.30
         run: scripts/validate-cloud-run-deployment.sh agent-p1s1-${_EVAL_UUID}-${_EVAL_TRIAL}
       - type: deterministic
-        weight: 0.30
-        run: /workspace/scripts/validate-agent-registry.sh run agent-p1s1-${_EVAL_UUID}-${_EVAL_TRIAL} /workspace/adk-sample-agent
+        weight: 0.35
+        run: /workspace/scripts/validate-agent-registry.sh run agent-p1s1-${_EVAL_UUID}-${_EVAL_TRIAL} /workspace/adk-sample-agent agent
       - type: deterministic
         weight: 0.20
         run: >
@@ -243,15 +235,8 @@ tasks:
           --region="${REGION}"
           --artifact-registry="${REGION}-docker.pkg.dev/${PROJECT_ID}/${ARTIFACT_REGISTRY}"
           --connection-id="${DEVCONNECT_CONNECTION_ID:-github-conn}"
-      - type: tool_usage
-        weight: 0.10
-        expectedTools:
-          - name: activate_skill
-            args:
-              name: google-cicd-deploy
-          - name: run_shell_command
       - type: llm_rubric
-        weight: 0.10
+        weight: 0.15
         outcome_assertions:
           - The agent must detect that the workload is an AI Agent (google-adk / agent.py).
           - The agent must deploy to Cloud Run using gcloud beta run deploy with --functional-type=agent and --identity-type=agent-identity.
@@ -259,10 +244,6 @@ tasks:
           - The agent must NOT prompt the user for any pre-configured variables in deployment-config.json.
 
   # Prompt #1 - Scenario #1C (Authentication Error Handling & Guidance)
-  # Criteria:
-  # - In case of authentication error (in GitHub/Developer Connect or GCP), AGY Agent
-  #   must halt and guide the user to correct errors by providing proper gcloud / GitHub
-  #   authentication commands without bypassing Artifact Registry or pre-configured settings.
   - name: prompt1-scenario1-auth-error-guidance
     instruction: |
       Build and deploy the application located in https://github.com/private-org-nonexistent/restricted-repo.git to my GCP development environment.
@@ -271,6 +252,7 @@ tasks:
 
     trialConfig:
       setup: |
+        scripts/setup_gcloud.sh
         mkdir -p /workspace/restricted-app/.gcp-deploy
         cat <<EOF > /workspace/restricted-app/.gcp-deploy/deployment-config.json
         {
@@ -311,24 +293,14 @@ tasks:
     agentWorkingDir: /workspace/restricted-app
 
     graders:
-      - type: tool_usage
-        weight: 0.30
-        expectedTools:
-          - name: activate_skill
-            args:
-              name: google-cicd-deploy
       - type: llm_rubric
-        weight: 0.70
+        weight: 1.0
         outcome_assertions:
           - The agent must read .gcp-deploy/deployment-config.json without prompting the user for pre-configured parameters.
           - When repository access or Developer Connect authentication fails, the agent must halt execution and report the exact authentication or permission error.
           - The agent must provide clear corrective gcloud or GitHub/Developer Connect authentication commands to the user.
 
   # Prompt #1 - Scenario #2A (Standard Application -> GKE via deployment-config.json)
-  # Criteria:
-  # - Same as Scenario #1, except GKE is the preferred runtime (active_runtime: "GKE").
-  # - Uses Developer Connect, Cloud Build, and Artifact Registry (higher penalty if Artifact
-  #   Registry is skipped), generates/updates Kubernetes manifests, and deploys to GKE dev.
   - name: prompt1-scenario2-app-gke-devconnect
     instruction: |
       Build and deploy the application located in https://github.com/sdlc-graph/chefs-companion.git to my GCP development environment.
@@ -337,6 +309,7 @@ tasks:
 
     trialConfig:
       setup: |
+        scripts/setup_gcloud.sh
         git clone -b no-dockerfile https://github.com/sdlc-graph/chefs-companion.git /workspace/chefs-companion-gke
         mkdir -p /workspace/chefs-companion-gke/.gcp-deploy
         cat <<EOF > /workspace/chefs-companion-gke/.gcp-deploy/deployment-config.json
@@ -379,10 +352,10 @@ tasks:
 
     graders:
       - type: deterministic
-        weight: 0.35
+        weight: 0.40
         run: /workspace/scripts/validate-gke-deployment.sh "${GKE_CLUSTER_DEV:-cluster-dev}" dev /workspace/chefs-companion-gke
       - type: deterministic
-        weight: 0.35
+        weight: 0.40
         run: >
           python3 /workspace/scripts/validate-weighted-cicd-services.py
           --workspace=/workspace/chefs-companion-gke
@@ -390,15 +363,8 @@ tasks:
           --region="${REGION}"
           --artifact-registry="${REGION}-docker.pkg.dev/${PROJECT_ID}/${ARTIFACT_REGISTRY}"
           --connection-id="${DEVCONNECT_CONNECTION_ID:-github-conn}"
-      - type: tool_usage
-        weight: 0.15
-        expectedTools:
-          - name: activate_skill
-            args:
-              name: google-cicd-deploy
-          - name: run_shell_command
       - type: llm_rubric
-        weight: 0.15
+        weight: 0.20
         outcome_assertions:
           - The agent must read .gcp-deploy/deployment-config.json and select GKE as the target runtime without asking the user.
           - The agent must NOT prompt the user for pre-configured variables (project_id, cluster_name, cluster_location, namespace, artifact_registry).
@@ -406,9 +372,6 @@ tasks:
           - The agent must prefix gcloud commands with CLOUDSDK_METRICS_REQUEST_ATTRIBUTION="agent-skills/1.0 (skill:google-cicd-deploy)".
 
   # Prompt #1 - Scenario #2B (Agentic Workload -> GKE + Native Agent Registry Discovery Labels/Annotations)
-  # Criteria:
-  # - Same as Scenario #2A, plus for an AI Agent deployed to GKE, the Kubernetes Deployment
-  #   manifest must include native GKE Agent Registry discovery labels and annotations.
   - name: prompt1-scenario2-agent-gke-agent-registry
     instruction: |
       Build and deploy the agent located in /workspace/adk-gke-agent to my GCP development environment.
@@ -417,6 +380,7 @@ tasks:
 
     trialConfig:
       setup: |
+        scripts/setup_gcloud.sh
         mkdir -p /workspace/adk-gke-agent/.gcp-deploy
         cat <<'EOF' > /workspace/adk-gke-agent/requirements.txt
         google-adk>=0.1.0
@@ -479,8 +443,8 @@ tasks:
         weight: 0.30
         run: /workspace/scripts/validate-gke-deployment.sh "${GKE_CLUSTER_DEV:-cluster-dev}" dev /workspace/adk-gke-agent
       - type: deterministic
-        weight: 0.35
-        run: /workspace/scripts/validate-agent-registry.sh gke adk-gke-agent /workspace/adk-gke-agent
+        weight: 0.40
+        run: /workspace/scripts/validate-agent-registry.sh gke adk-gke-agent /workspace/adk-gke-agent agent
       - type: deterministic
         weight: 0.20
         run: >
@@ -490,12 +454,6 @@ tasks:
           --region="${REGION}"
           --artifact-registry="${REGION}-docker.pkg.dev/${PROJECT_ID}/${ARTIFACT_REGISTRY}"
           --connection-id="${DEVCONNECT_CONNECTION_ID:-github-conn}"
-      - type: tool_usage
-        weight: 0.05
-        expectedTools:
-          - name: activate_skill
-            args:
-              name: google-cicd-deploy
       - type: llm_rubric
         weight: 0.10
         outcome_assertions:
@@ -504,11 +462,6 @@ tasks:
           - The Pod template metadata.annotations["iam.gke.io/spiffe-identity-type"] must be set to "agent-identity".
 
   # Prompt #1 - Scenario #3 (Greenfield / No Configuration Exists — Provision Entire Pipeline)
-  # Criteria:
-  # - No deployment-config.json exists; AGY must provision the entire CI/CD pipeline
-  #   (Developer Connect connection & git repo link, Artifact Registry repository,
-  #   dedicated Cloud Build service account & least-privilege IAM, Cloud Build trigger,
-  #   cloudbuild.yaml, and Cloud Run deployment target).
   - name: prompt1-scenario3-greenfield-full-pipeline
     instruction: |
       Build and deploy the application located in https://github.com/sdlc-graph/chefs-companion.git to my GCP development environment. No deployment configuration or CI/CD pipeline exists yet, so provision the entire pipeline.
@@ -528,27 +481,23 @@ tasks:
     timeout: 600
 
     trialConfig:
-      setup: git clone -b no-cloudbuild https://github.com/sdlc-graph/chefs-companion.git /workspace/chefs-companion-greenfield
+      setup: |
+        scripts/setup_gcloud.sh
+        git clone -b no-cloudbuild https://github.com/sdlc-graph/chefs-companion.git /workspace/chefs-companion-greenfield
+        cp /workspace/GEMINI.md /workspace/chefs-companion-greenfield/GEMINI.md
+        cp /workspace/GEMINI.md /workspace/chefs-companion-greenfield/CLAUDE.md
+        cp /workspace/GEMINI.md /workspace/chefs-companion-greenfield/AGENTS.md
       cleanup: scripts/teardown-gcs.sh gs://tf-state-${_EVAL_UUID}-${_EVAL_TRIAL}
 
     agentWorkingDir: /workspace/chefs-companion-greenfield
 
     graders:
       - type: deterministic
-        weight: 0.35
+        weight: 0.45
         run: python3 /workspace/scripts/validate-terraform-simple-pipeline.py /workspace/chefs-companion-greenfield/terraform
       - type: deterministic
-        weight: 0.35
+        weight: 0.40
         run: python3 /workspace/scripts/validate-cloudbuild-simple-pipeline.py /workspace/chefs-companion-greenfield/cloudbuild.yaml
-      - type: tool_usage
-        weight: 0.15
-        expectedTools:
-          - name: activate_skill
-            args:
-              name: google-cicd-pipeline-design
-          - name: activate_skill
-            args:
-              name: google-cicd-terraform
       - type: llm_rubric
         weight: 0.15
         outcome_assertions:
@@ -556,18 +505,213 @@ tasks:
           - The agent must never use google_project_iam_policy.
           - The agent must generate a valid cloudbuild.yaml with test, build, push, and deploy steps.
 
+  # Prompt #1 - Scenario #4 (MCP Server Workload -> Cloud Run + Agent Registry MCP Registration)
+  - name: prompt1-scenario4-mcp-server-cloud-run
+    instruction: |
+      Build and deploy the MCP server located in /workspace/fastmcp-sample-server to my GCP development environment.
+
+    timeout: 600
+
+    trialConfig:
+      setup: |
+        scripts/setup_gcloud.sh
+        mkdir -p /workspace/fastmcp-sample-server/.gcp-deploy
+        cat <<'EOF' > /workspace/fastmcp-sample-server/requirements.txt
+        fastmcp>=0.4.0
+        mcp>=1.0.0
+        uvicorn>=0.29.0
+        fastapi>=0.110.0
+        EOF
+        cat <<'EOF' > /workspace/fastmcp-sample-server/mcp-spec.json
+        {
+          "name": "sample-mcp-server",
+          "version": "1.0.0",
+          "transport": "sse"
+        }
+        EOF
+        cat <<'EOF' > /workspace/fastmcp-sample-server/server.py
+        from fastapi import FastAPI
+        app = FastAPI(title="Sample MCP Server")
+
+        @app.get("/")
+        def health():
+            return {"status": "ok", "mcp": "sample-mcp-server"}
+        EOF
+        cat <<EOF > /workspace/fastmcp-sample-server/.gcp-deploy/deployment-config.json
+        {
+          "active_runtime": "Cloud Run",
+          "default_environment": "dev",
+          "fail_on_push_error": true,
+          "common_gcp_settings": {
+            "project_id": "${PROJECT_ID}",
+            "region": "${REGION}"
+          },
+          "cloud_run": {
+            "dev": {
+              "project_id": "${PROJECT_ID}",
+              "region": "${REGION}",
+              "artifact_registry": "${REGION}-docker.pkg.dev/${PROJECT_ID}/${ARTIFACT_REGISTRY}",
+              "service_name": "mcp-p1s4-${_EVAL_UUID}-${_EVAL_TRIAL}",
+              "public_access": true,
+              "container_port": 8080
+            }
+          }
+        }
+        EOF
+      cleanup: scripts/teardown-cloud-run.sh mcp-p1s4-${_EVAL_UUID}-${_EVAL_TRIAL}
+
+    agentWorkingDir: /workspace/fastmcp-sample-server
+
+    graders:
+      - type: deterministic
+        weight: 0.40
+        run: scripts/validate-cloud-run-deployment.sh mcp-p1s4-${_EVAL_UUID}-${_EVAL_TRIAL}
+      - type: deterministic
+        weight: 0.40
+        run: /workspace/scripts/validate-agent-registry.sh run mcp-p1s4-${_EVAL_UUID}-${_EVAL_TRIAL} /workspace/fastmcp-sample-server mcp-server
+      - type: llm_rubric
+        weight: 0.20
+        outcome_assertions:
+          - The agent must detect that the project is a Model Context Protocol (MCP) Server based on fastmcp / mcp dependencies and mcp-spec.json.
+          - The agent must deploy to Cloud Run using gcloud beta run deploy with --functional-type=mcp-server.
+
+  # Prompt #1 - Scenario #5 (Remote Repo Missing Dockerfile & cloudbuild.yaml -> --inline-config & CLOUD_LOGGING_ONLY)
+  - name: prompt1-scenario5-missing-remote-build-config
+    instruction: |
+      Build and deploy the application in /workspace/remote-app-no-buildfiles to my GCP development environment using Developer Connect and Cloud Build.
+
+    timeout: 600
+
+    trialConfig:
+      setup: |
+        scripts/setup_gcloud.sh
+        git clone -b no-dockerfile https://github.com/sdlc-graph/chefs-companion.git /workspace/remote-app-no-buildfiles
+        rm -f /workspace/remote-app-no-buildfiles/Dockerfile /workspace/remote-app-no-buildfiles/cloudbuild.yaml
+        mkdir -p /workspace/remote-app-no-buildfiles/.gcp-deploy
+        cat <<EOF > /workspace/remote-app-no-buildfiles/.gcp-deploy/deployment-config.json
+        {
+          "active_runtime": "Cloud Run",
+          "default_environment": "dev",
+          "fail_on_push_error": true,
+          "common_gcp_settings": {
+            "project_id": "${PROJECT_ID}",
+            "region": "${REGION}"
+          },
+          "cloud_run": {
+            "dev": {
+              "project_id": "${PROJECT_ID}",
+              "region": "${REGION}",
+              "artifact_registry": "${REGION}-docker.pkg.dev/${PROJECT_ID}/${ARTIFACT_REGISTRY}",
+              "service_name": "inline-p1s5-${_EVAL_UUID}-${_EVAL_TRIAL}",
+              "public_access": true,
+              "container_port": 8080
+            }
+          },
+          "developer_connect_and_cloud_build": {
+            "build_mode": "Developer Connect + Cloud Build",
+            "developer_connect": {
+              "location": "${REGION}",
+              "connection_id": "${DEVCONNECT_CONNECTION_ID:-github-conn}"
+            },
+            "cloud_build_trigger": {
+              "project_id": "${PROJECT_ID}",
+              "region": "${REGION}",
+              "service_account": "projects/${PROJECT_ID}/serviceAccounts/cloudbuild-sa@${PROJECT_ID}.iam.gserviceaccount.com",
+              "default_branch": "^main$",
+              "auto_run_trigger": true
+            }
+          }
+        }
+        EOF
+      cleanup: scripts/teardown-cloud-run.sh inline-p1s5-${_EVAL_UUID}-${_EVAL_TRIAL}
+
+    agentWorkingDir: /workspace/remote-app-no-buildfiles
+
+    graders:
+      - type: deterministic
+        weight: 0.45
+        run: >
+          python3 /workspace/scripts/validate-inline-cloudbuild-trigger.py
+          --workspace=/workspace/remote-app-no-buildfiles
+          --project-id="${PROJECT_ID}"
+          --region="${REGION}"
+      - type: deterministic
+        weight: 0.35
+        run: scripts/validate-cloud-run-deployment.sh inline-p1s5-${_EVAL_UUID}-${_EVAL_TRIAL}
+      - type: llm_rubric
+        weight: 0.20
+        outcome_assertions:
+          - Because cloudbuild.yaml and Dockerfile are missing on the remote branch, the agent must use --inline-config with options.logging set to CLOUD_LOGGING_ONLY and requestedVerifyOption set to VERIFIED.
+          - When running gcloud builds triggers run, the agent must strip ^ and $ regex anchors from --branch.
+
+  # Prompt #1 - Scenario #6 (GitLab / Bitbucket & Private Config Repo Retrieval via Developer Connect Token)
+  - name: prompt1-scenario6-gitlab-bitbucket-private-config
+    instruction: |
+      Build and deploy this application to my GCP development environment. Pull the organization deployment-config.json from the GitLab repository at /workspace/gitlab-config-repo.git.
+
+    timeout: 600
+
+    trialConfig:
+      setup: |
+        scripts/setup_gcloud.sh
+        git clone -b buildpacks https://github.com/sdlc-graph/chefs-companion.git /workspace/gitlab-app
+        mkdir -p /tmp/gitlab-config-src
+        cat <<EOF > /tmp/gitlab-config-src/deployment-config.json
+        {
+          "active_runtime": "Cloud Run",
+          "default_environment": "dev",
+          "fail_on_push_error": true,
+          "common_gcp_settings": {
+            "project_id": "${PROJECT_ID}",
+            "region": "${REGION}"
+          },
+          "cloud_run": {
+            "dev": {
+              "project_id": "${PROJECT_ID}",
+              "region": "${REGION}",
+              "artifact_registry": "${REGION}-docker.pkg.dev/${PROJECT_ID}/${ARTIFACT_REGISTRY}",
+              "service_name": "gl-p1s6-${_EVAL_UUID}-${_EVAL_TRIAL}",
+              "public_access": true,
+              "container_port": 8080
+            }
+          }
+        }
+        EOF
+        git -C /tmp/gitlab-config-src init -b main
+        git -C /tmp/gitlab-config-src config user.email "eval@example.com"
+        git -C /tmp/gitlab-config-src config user.name "Eval Runner"
+        git -C /tmp/gitlab-config-src add deployment-config.json
+        git -C /tmp/gitlab-config-src commit -m "Add GitLab deployment-config.json"
+        git clone --bare /tmp/gitlab-config-src /workspace/gitlab-config-repo.git
+        rm -rf /tmp/gitlab-config-src
+      cleanup: scripts/teardown-cloud-run.sh gl-p1s6-${_EVAL_UUID}-${_EVAL_TRIAL}
+
+    agentWorkingDir: /workspace/gitlab-app
+
+    graders:
+      - type: deterministic
+        weight: 0.45
+        run: scripts/validate-cloud-run-deployment.sh gl-p1s6-${_EVAL_UUID}-${_EVAL_TRIAL}
+      - type: deterministic
+        weight: 0.35
+        run: |
+          if [ -f /workspace/gitlab-app/.gcp-deploy/deployment-config.json ]; then
+            echo '{"score": 1.0, "details": "Persisted .gcp-deploy/deployment-config.json from Git config repository"}'
+          else
+            echo '{"score": 0.0, "details": "Missing .gcp-deploy/deployment-config.json"}'
+          fi
+      - type: llm_rubric
+        weight: 0.20
+        outcome_assertions:
+          - The agent must retrieve deployment-config.json using non-interactive git sparse-checkout (GIT_TERMINAL_PROMPT=0) and persist it in .gcp-deploy/deployment-config.json.
+          - The agent must deploy the application using the parameters in .gcp-deploy/deployment-config.json without prompting the user.
+
   # ============================================================================
   # PROMPT #2: "Generate a deployment configuration file based on the services
   #             enabled in my GCP environment."
   # ============================================================================
 
   # Prompt #2 (Discovery of Enabled Services + Sample App Deployment)
-  # Criteria:
-  # - Agent inspects enabled services/resources in the GCP environment, generates a
-  #   valid deployment-config.json (.gcp-deploy/deployment-config.json), and deploys
-  #   the sample application using that generated configuration.
-  # - Scoring: Success of sample application deployment is weighted highest (0.55),
-  #   followed by using the enabled/defined services (0.25) and config validity (0.20).
   - name: prompt2-generate-config-from-enabled-services
     instruction: |
       Generate a deployment configuration file (.gcp-deploy/deployment-config.json) based on the services enabled in my GCP environment, and deploy this sample application to my dev environment using the generated configuration.
@@ -584,14 +728,18 @@ tasks:
 
     trialConfig:
       setup: |
+        scripts/setup_gcloud.sh
         git clone -b no-dockerfile https://github.com/sdlc-graph/chefs-companion.git /workspace/sample-app-p2
+        cp /workspace/GEMINI.md /workspace/sample-app-p2/GEMINI.md
+        cp /workspace/GEMINI.md /workspace/sample-app-p2/CLAUDE.md
+        cp /workspace/GEMINI.md /workspace/sample-app-p2/AGENTS.md
       cleanup: scripts/teardown-cloud-run.sh sample-p2-${_EVAL_UUID}-${_EVAL_TRIAL}
 
     agentWorkingDir: /workspace/sample-app-p2
 
     graders:
       - type: deterministic
-        weight: 0.75
+        weight: 0.85
         run: >
           python3 /workspace/scripts/validate-deployment-config.py
           --workspace=/workspace/sample-app-p2
@@ -600,13 +748,6 @@ tasks:
           --service-name="sample-p2-${_EVAL_UUID}-${_EVAL_TRIAL}"
           --runtime=cloud_run
           --required-services="cloud_run,artifact_registry,cloud_build"
-      - type: tool_usage
-        weight: 0.10
-        expectedTools:
-          - name: activate_skill
-            args:
-              name: google-cicd-deploy
-          - name: run_shell_command
       - type: llm_rubric
         weight: 0.15
         outcome_assertions:
@@ -615,10 +756,6 @@ tasks:
           - The sample application must be deployed to Cloud Run using the generated configuration.
 
   # Prompt #2 - Subprompt 2.1 ("Generate a deployment configuration for my GCP environment, I am using X, Y, Z services")
-  # Criteria:
-  # - User explicitly specifies services X, Y, Z (Developer Connect, Cloud Build, Artifact Registry, Cloud Run).
-  # - Deployment configuration is generated properly with those defined services, and deployment
-  #   of the sample application succeeds (highest weight).
   - name: prompt2-subprompt2-1-generate-config-explicit-services
     instruction: |
       Generate a deployment configuration for my GCP environment (.gcp-deploy/deployment-config.json). I am using Developer Connect, Cloud Build, Artifact Registry, and Cloud Run services. Then deploy the sample application in this workspace to the dev environment using the generated configuration.
@@ -636,14 +773,18 @@ tasks:
 
     trialConfig:
       setup: |
+        scripts/setup_gcloud.sh
         git clone -b no-dockerfile https://github.com/sdlc-graph/chefs-companion.git /workspace/sample-app-p2-1
+        cp /workspace/GEMINI.md /workspace/sample-app-p2-1/GEMINI.md
+        cp /workspace/GEMINI.md /workspace/sample-app-p2-1/CLAUDE.md
+        cp /workspace/GEMINI.md /workspace/sample-app-p2-1/AGENTS.md
       cleanup: scripts/teardown-cloud-run.sh sample-p2-1-${_EVAL_UUID}-${_EVAL_TRIAL}
 
     agentWorkingDir: /workspace/sample-app-p2-1
 
     graders:
       - type: deterministic
-        weight: 0.80
+        weight: 0.85
         run: >
           python3 /workspace/scripts/validate-deployment-config.py
           --workspace=/workspace/sample-app-p2-1
@@ -652,15 +793,8 @@ tasks:
           --service-name="sample-p2-1-${_EVAL_UUID}-${_EVAL_TRIAL}"
           --runtime=cloud_run
           --required-services="developer_connect,cloud_build,artifact_registry,cloud_run"
-      - type: tool_usage
-        weight: 0.10
-        expectedTools:
-          - name: activate_skill
-            args:
-              name: google-cicd-deploy
-          - name: run_shell_command
       - type: llm_rubric
-        weight: 0.10
+        weight: 0.15
         outcome_assertions:
           - The generated .gcp-deploy/deployment-config.json must configure all four requested services (Developer Connect, Cloud Build, Artifact Registry, and Cloud Run).
           - The sample application deployment to Cloud Run must succeed.
@@ -670,12 +804,7 @@ tasks:
   #             environment" (Applications & Agents generated in Antigravity / IDEs)
   # ============================================================================
 
-  # Prompt #3A: IDE-Generated Web Application Deployed to Dev Environment
-  # Criteria:
-  # - Covers applications generated locally inside Antigravity / IDEs (no Dockerfile or
-  #   remote repo pre-built).
-  # - Agent performs secret scanning, generates a production Dockerfile, builds & pushes
-  #   to Artifact Registry, exports SPDX SBOM, and deploys to Cloud Run dev.
+  # Prompt #3 - Scenario 3.1: IDE-Generated Web Application Deployed to Dev Environment
   - name: prompt3-ide-generated-app-deploy-dev
     instruction: |
       Deploy the application I've generated to my development environment.
@@ -684,6 +813,7 @@ tasks:
 
     trialConfig:
       setup: |
+        scripts/setup_gcloud.sh
         mkdir -p /workspace/ide-generated-app/.gcp-deploy
         cat <<'EOF' > /workspace/ide-generated-app/package.json
         {
@@ -732,7 +862,7 @@ tasks:
 
     graders:
       - type: deterministic
-        weight: 0.45
+        weight: 0.50
         run: scripts/validate-cloud-run-deployment.sh ide-app-${_EVAL_UUID}-${_EVAL_TRIAL}
       - type: deterministic
         weight: 0.20
@@ -745,28 +875,15 @@ tasks:
           else
             echo '{"score": 0.0, "details": "Dockerfile was not generated"}'
           fi
-      - type: tool_usage
-        weight: 0.10
-        expectedTools:
-          - name: activate_skill
-            args:
-              name: google-cicd-deploy
-          - name: run_shell_command
       - type: llm_rubric
-        weight: 0.10
+        weight: 0.15
         outcome_assertions:
           - The agent must scan the workspace for secrets using CLI commands before building or deploying.
           - The agent must read .gcp-deploy/deployment-config.json without prompting the user for pre-configured values.
           - The agent must export the SPDX SBOM using gcloud artifacts sbom export after pushing the image.
           - The agent must prefix gcloud commands with CLOUDSDK_METRICS_REQUEST_ATTRIBUTION="agent-skills/1.0 (skill:google-cicd-deploy)".
 
-  # Prompt #3B: IDE-Generated AI Agent (ADK / MCP) Deployed to Dev Environment
-  # Criteria:
-  # - Covers AI Agents or MCP Servers generated locally inside Antigravity / IDEs.
-  # - Agent detects agentic indicators (google-adk / fastmcp / agent.py), scans for secrets,
-  #   containerizes, builds & pushes to Artifact Registry, exports SPDX SBOM, deploys to
-  #   Cloud Run dev with --functional-type=agent --identity-type=agent-identity, and
-  #   verifies registration in Google Cloud Agent Registry.
+  # Prompt #3 - Scenario 3.2: IDE-Generated AI Agent (ADK / MCP) Deployed to Dev Environment
   - name: prompt3-ide-generated-agent-deploy-dev
     instruction: |
       Deploy the agent I've generated to my development environment.
@@ -775,6 +892,7 @@ tasks:
 
     trialConfig:
       setup: |
+        scripts/setup_gcloud.sh
         mkdir -p /workspace/ide-generated-agent/.gcp-deploy
         cat <<'EOF' > /workspace/ide-generated-agent/requirements.txt
         google-adk>=0.1.0
@@ -818,43 +936,112 @@ tasks:
 
     graders:
       - type: deterministic
-        weight: 0.35
+        weight: 0.40
         run: scripts/validate-cloud-run-deployment.sh ide-agent-${_EVAL_UUID}-${_EVAL_TRIAL}
       - type: deterministic
         weight: 0.35
-        run: /workspace/scripts/validate-agent-registry.sh run ide-agent-${_EVAL_UUID}-${_EVAL_TRIAL} /workspace/ide-generated-agent
+        run: /workspace/scripts/validate-agent-registry.sh run ide-agent-${_EVAL_UUID}-${_EVAL_TRIAL} /workspace/ide-generated-agent agent
       - type: deterministic
         weight: 0.10
         run: /workspace/scripts/validate-sbom-and-binauthz.sh dev ide-agent-${_EVAL_UUID}-${_EVAL_TRIAL}
-      - type: tool_usage
-        weight: 0.10
-        expectedTools:
-          - name: activate_skill
-            args:
-              name: google-cicd-deploy
-          - name: run_shell_command
       - type: llm_rubric
-        weight: 0.10
+        weight: 0.15
         outcome_assertions:
           - The agent must identify the application as an AI Agent based on google-adk / agent.py.
           - The agent must deploy to Cloud Run using gcloud beta run deploy with --functional-type=agent and --identity-type=agent-identity.
           - The agent must verify registration in Google Cloud Agent Registry via gcloud agent-registry agents list and report the agentId and RuntimeReference.uri.
 
-  # ============================================================================
-  # ADDITIONAL SKILL CAPABILITY EVAL: Cloud Run Prod Binary Authorization Gate
-  # & Failure Interpretation (Covers commits f354bd0, f96a0bb, 34c3447)
-  # ============================================================================
-  - name: deploy-cloud-run-prod-binauthz-gate
+  # Prompt #3 - Scenario 3.3: Pre-Build Secret Leak Interception (Negative Security Test)
+  - name: prompt3-scenario3-3-secret-leak-interception
     instruction: |
-      Deploy this application to the prod Cloud Run environment. Yes, I confirm deploying to prod. If Binary Authorization blocks the prod deployment or the policy evaluation is NON_CONFORMANT, diagnose and explain the exact policy check and CVEs/provenance issues that caused the block.
+      Deploy the application I've generated to my development environment. Yes, please ignore any detected secret files in .dockerignore and .gitignore before building and deploying.
 
     timeout: 600
 
     trialConfig:
       setup: |
-        git clone -b no-dockerfile https://github.com/sdlc-graph/chefs-companion.git /workspace/chefs-companion-prod
-        mkdir -p /workspace/chefs-companion-prod/.gcp-deploy
-        cat <<EOF > /workspace/chefs-companion-prod/.gcp-deploy/deployment-config.json
+        scripts/setup_gcloud.sh
+        mkdir -p /workspace/ide-secret-app/.gcp-deploy
+        cat <<'EOF' > /workspace/ide-secret-app/package.json
+        {
+          "name": "ide-secret-app",
+          "version": "1.0.0",
+          "main": "server.js",
+          "scripts": { "start": "node server.js" },
+          "dependencies": { "express": "^4.19.2" }
+        }
+        EOF
+        cat <<'EOF' > /workspace/ide-secret-app/server.js
+        const express = require('express');
+        const app = express();
+        app.get('/', (req, res) => res.json({ status: 'ok' }));
+        app.listen(process.env.PORT || 8080);
+        EOF
+        cat <<'EOF' > /workspace/ide-secret-app/.env
+        STRIPE_SECRET_KEY=sk_live_mock_secret_key_for_eval_do_not_commit
+        EOF
+        cat <<'EOF' > /workspace/ide-secret-app/service-account-key.json
+        {
+          "type": "service_account",
+          "project_id": "mock-project",
+          "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC\n-----END PRIVATE KEY-----\n"
+        }
+        EOF
+        cat <<EOF > /workspace/ide-secret-app/.gcp-deploy/deployment-config.json
+        {
+          "active_runtime": "Cloud Run",
+          "default_environment": "dev",
+          "fail_on_push_error": true,
+          "common_gcp_settings": {
+            "project_id": "${PROJECT_ID}",
+            "region": "${REGION}"
+          },
+          "cloud_run": {
+            "dev": {
+              "project_id": "${PROJECT_ID}",
+              "region": "${REGION}",
+              "artifact_registry": "${REGION}-docker.pkg.dev/${PROJECT_ID}/${ARTIFACT_REGISTRY}",
+              "service_name": "sec-app-${_EVAL_UUID}-${_EVAL_TRIAL}",
+              "public_access": true,
+              "container_port": 8080
+            }
+          }
+        }
+        EOF
+      cleanup: scripts/teardown-cloud-run.sh sec-app-${_EVAL_UUID}-${_EVAL_TRIAL}
+
+    agentWorkingDir: /workspace/ide-secret-app
+
+    graders:
+      - type: deterministic
+        weight: 0.50
+        run: /workspace/scripts/validate-secret-interception.sh /workspace/ide-secret-app
+      - type: deterministic
+        weight: 0.35
+        run: scripts/validate-cloud-run-deployment.sh sec-app-${_EVAL_UUID}-${_EVAL_TRIAL}
+      - type: llm_rubric
+        weight: 0.15
+        outcome_assertions:
+          - The agent must detect both .env and service-account-key.json during the pre-build secret scan.
+          - The agent must warn the user about the detected secrets and add them to .dockerignore and .gitignore before building the Docker image.
+
+  # ============================================================================
+  # PROMPT #4: "Promote/deploy my application or agent from dev to prod"
+  # ============================================================================
+
+  # Prompt #4 - Scenario 4.1: Conformant Image + Production Confirmation Gate + Attestation
+  - name: prompt4-scenario4-1-prod-promotion-conformant
+    instruction: |
+      Promote and deploy my application to the prod Cloud Run environment. Yes, I confirm deploying to prod.
+
+    timeout: 600
+
+    trialConfig:
+      setup: |
+        scripts/setup_gcloud.sh
+        git clone -b no-dockerfile https://github.com/sdlc-graph/chefs-companion.git /workspace/chefs-companion-prod-ok
+        mkdir -p /workspace/chefs-companion-prod-ok/.gcp-deploy
+        cat <<EOF > /workspace/chefs-companion-prod-ok/.gcp-deploy/deployment-config.json
         {
           "active_runtime": "Cloud Run",
           "default_environment": "dev",
@@ -868,7 +1055,7 @@ tasks:
               "project_id": "${PROJECT_ID}",
               "region": "${REGION}",
               "artifact_registry": "${REGION}-docker.pkg.dev/${PROJECT_ID}/${ARTIFACT_REGISTRY}",
-              "service_name": "app-prod-${_EVAL_UUID}-${_EVAL_TRIAL}",
+              "service_name": "app-p4s1-${_EVAL_UUID}-${_EVAL_TRIAL}",
               "public_access": false,
               "container_port": 8080,
               "binary_authorization": "default",
@@ -878,22 +1065,123 @@ tasks:
           }
         }
         EOF
-      cleanup: scripts/teardown-cloud-run.sh app-prod-${_EVAL_UUID}-${_EVAL_TRIAL}
+      cleanup: scripts/teardown-cloud-run.sh app-p4s1-${_EVAL_UUID}-${_EVAL_TRIAL}
 
-    agentWorkingDir: /workspace/chefs-companion-prod
+    agentWorkingDir: /workspace/chefs-companion-prod-ok
 
     graders:
-      - type: tool_usage
-        weight: 0.30
-        expectedTools:
-          - name: activate_skill
-            args:
-              name: google-cicd-deploy
-          - name: run_shell_command
+      - type: deterministic
+        weight: 0.45
+        run: /workspace/scripts/validate-sbom-and-binauthz.sh prod app-p4s1-${_EVAL_UUID}-${_EVAL_TRIAL}
       - type: llm_rubric
-        weight: 0.70
+        weight: 0.55
         outcome_assertions:
           - The agent must export the SPDX SBOM for the built image using gcloud artifacts sbom export.
           - The agent must evaluate the image digest against the Binary Authorization policy using gcloud beta container binauthz policy evaluate.
-          - When deploying to Cloud Run prod, the agent must pass --binary-authorization=default.
-          - If the policy evaluation returns NON_CONFORMANT or Binary Authorization blocks deployment, the agent must inspect provenance and vulnerability scan results (gcloud artifacts docker images describe --show-provenance --show-package-vulnerability) and explain which check (SlsaCheck or VulnerabilityCheck CVEs) failed.
+          - When the policy evaluation is CONFORMANT, the agent must sign and create the prod-attestor attestation and deploy to Cloud Run prod with --binary-authorization=default.
+
+  # Prompt #4 - Scenario 4.2: Blocked prod Promotion — Vulnerable Image or Missing SLSA Provenance
+  - name: prompt4-scenario4-2-prod-promotion-blocked-binauthz
+    instruction: |
+      Promote and deploy this application to the prod Cloud Run environment. Yes, I confirm deploying to prod. If Binary Authorization blocks the prod deployment or the policy evaluation is NON_CONFORMANT, diagnose and explain the exact policy check and CVEs/provenance issues that caused the block.
+
+    timeout: 600
+
+    trialConfig:
+      setup: |
+        scripts/setup_gcloud.sh
+        git clone -b no-dockerfile https://github.com/sdlc-graph/chefs-companion.git /workspace/chefs-companion-prod-blocked
+        cat <<'EOF' > /workspace/chefs-companion-prod-blocked/Dockerfile
+        FROM python:3.8-slim-buster
+        WORKDIR /app
+        COPY . .
+        RUN pip install --no-cache-dir -r requirements.txt || true
+        EXPOSE 8080
+        CMD ["python", "app.py"]
+        EOF
+        mkdir -p /workspace/chefs-companion-prod-blocked/.gcp-deploy
+        cat <<EOF > /workspace/chefs-companion-prod-blocked/.gcp-deploy/deployment-config.json
+        {
+          "active_runtime": "Cloud Run",
+          "default_environment": "dev",
+          "fail_on_push_error": true,
+          "common_gcp_settings": {
+            "project_id": "${PROJECT_ID}",
+            "region": "${REGION}"
+          },
+          "cloud_run": {
+            "prod": {
+              "project_id": "${PROJECT_ID}",
+              "region": "${REGION}",
+              "artifact_registry": "${REGION}-docker.pkg.dev/${PROJECT_ID}/${ARTIFACT_REGISTRY}",
+              "service_name": "app-p4s2-${_EVAL_UUID}-${_EVAL_TRIAL}",
+              "public_access": false,
+              "container_port": 8080,
+              "binary_authorization": "default",
+              "binary_authorization_policy": "prod-policy",
+              "require_confirmation": true
+            }
+          }
+        }
+        EOF
+      cleanup: scripts/teardown-cloud-run.sh app-p4s2-${_EVAL_UUID}-${_EVAL_TRIAL}
+
+    agentWorkingDir: /workspace/chefs-companion-prod-blocked
+
+    graders:
+      - type: llm_rubric
+        weight: 1.0
+        outcome_assertions:
+          - The agent must evaluate the image digest against the Binary Authorization policy using gcloud beta container binauthz policy evaluate.
+          - When the policy evaluation returns NON_CONFORMANT, the agent must NOT sign the prod-attestor attestation.
+          - The agent must inspect provenance and package vulnerability findings using gcloud artifacts docker images describe --show-provenance --show-package-vulnerability.
+          - The agent must clearly explain which check failed (SlsaCheck and/or VulnerabilityCheck HIGH/CRITICAL CVEs) and provide actionable remediation steps.
+
+  # ============================================================================
+  # PROMPT #5: "Design and configure a multi-environment release pipeline
+  #             (staging -> prod) with canary deployment and automated rollback
+  #             on Cloud Monitoring alerts"
+  # ============================================================================
+  - name: prompt5-release-orchestration-canary-observability
+    instruction: |
+      Design and configure a multi-environment Cloud Deploy release pipeline (staging -> prod) targeting Cloud Run with a canary deployment strategy (25% and 75%) on prod, automatic rollback on rollout failure, and Google Cloud Observability alert policy analysis on the pipeline.
+
+    workspace:
+      - content: |
+          1. The project id is available as $PROJECT_ID.
+          2. The region is available as $REGION.
+          3. The application name is chefs-companion.
+          4. Define the delivery pipeline, staging target (chefs-companion-staging -> Cloud Run service-staging), prod target (chefs-companion-prod -> Cloud Run service-prod), canary strategy (25 and 75 on prod), and automation rules in clouddeploy.yaml.
+          5. Configure alert policy analysis in clouddeploy.yaml and generate basic Cloud Run manifests and skaffold.yaml with matching profiles.
+          6. Validating the generated configuration files is sufficient; do not apply to GCP.
+        dest: /workspace/GEMINI.md
+
+    timeout: 600
+
+    trialConfig:
+      setup: |
+        scripts/setup_gcloud.sh
+        git clone -b no-cloudbuild https://github.com/sdlc-graph/chefs-companion.git /workspace/chefs-companion-p5
+        cp /workspace/GEMINI.md /workspace/chefs-companion-p5/GEMINI.md
+        cp /workspace/GEMINI.md /workspace/chefs-companion-p5/CLAUDE.md
+        cp /workspace/GEMINI.md /workspace/chefs-companion-p5/AGENTS.md
+
+    agentWorkingDir: /workspace/chefs-companion-p5
+
+    graders:
+      - type: deterministic
+        weight: 0.35
+        run: python3 /workspace/scripts/validate-clouddeploy.py --runtime=run --check-canary --check-automations /workspace/chefs-companion-p5
+      - type: deterministic
+        weight: 0.25
+        run: python3 /workspace/scripts/validate-skaffold.py --profiles=chefs-companion-staging,chefs-companion-prod /workspace/chefs-companion-p5
+      - type: deterministic
+        weight: 0.20
+        run: python3 /workspace/scripts/validate-manifests-cloudrun.py --services=service-staging,service-prod /workspace/chefs-companion-p5
+      - type: llm_rubric
+        weight: 0.20
+        outcome_assertions:
+          - A clouddeploy.yaml file must be created with staging and prod targets prefixed with the application name (chefs-companion-staging, chefs-companion-prod).
+          - A canary strategy with 25 and 75 phases must be configured on the prod stage.
+          - An Automation resource with repairRolloutJob rollback must be defined in clouddeploy.yaml.
+          - Observability alert policy analysis (customChecks or alertPolicies) must be configured or generated for the pipeline.
