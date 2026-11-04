@@ -4,7 +4,7 @@ metadata:
   version: "1.0.0"
   category: DevOps
 description: >-
-  Architect, provision, and troubleshoot infrastructure on Google Cloud using Terraform. This skill ensures best practices like GCS backend usage and least-privilege IAM are followed. Enforces Google’s Cloud Foundation Fabric patterns and rigorous validation protocols to ensure secure, idempotent, and scalable deployments across environments. Activate when the user requests infrastructure changes, pipeline design involving Terraform, or debugging Terraform issues.
+  Architect, provision, and troubleshoot infrastructure on Google Cloud using Terraform. This skill ensures best practices like GCS backend usage and least-privilege IAM are followed. Enforces Google's Cloud Foundation Fabric patterns and rigorous validation protocols to ensure secure, idempotent, and scalable deployments across environments. Activate when the user requests infrastructure changes, pipeline design involving Terraform, or debugging Terraform issues.
 ---
 
 # Terraform GCP Skill
@@ -28,7 +28,7 @@ This skill provides expert-level guidance for architecting, deploying, and manag
 - Troubleshooting `terraform plan` discrepancies in GCP.
 
 ## 🏗️ Core Architecture: GCS Backend & State
-**Always** use a GCS backend for state. Local state is strictly for local prototyping and must never be committed. If local state direcotry is used, add it to .gitignore.
+**Always** use a GCS backend for state. Local state is strictly for local prototyping and must never be committed. If local state directory is used, add it to .gitignore.
 
 ### Standard Backend Configuration
 ```hcl
@@ -111,8 +111,7 @@ To maintain a clean module interface, use the main identifier for singleton reso
     ```
 
 2. IAM Management
-   - Never use google_project_iam_policy: This resource is authoritative and replaces the entire IAM policy for the project. It is the #1 cause of accidental lockouts.
-   - Avoid `google_project_iam_policy`: This resource is authoritative for the entire project and is a common cause of accidental lockouts.
+   - Never use `google_project_iam_policy`: This resource is authoritative and replaces the entire IAM policy for the project. It is the #1 cause of accidental lockouts.
 
    - Prefer `google_project_iam_member` or `google_project_iam_binding`:
      - `google_project_iam_member` is additive and safely grants a role to a single member.
@@ -192,11 +191,9 @@ Follow this standard to ensure compatibility with Antigravity (AGY) discovery an
 ## ⚠️ Anti-Patterns (Do NOT do these)
    - ❌ Legacy GitHub Triggers: Do not use the legacy `github` block in `google_cloudbuild_trigger`. Always use `developer_connect_event_config`.
 
-   - ❌ Hardcoded IDs: Never hardcode Project IDs. Use variables or data "google_project" sources.
+   - ❌ Hardcoded IDs: Never hardcode Project IDs. Use variables or a `data "google_project"` source.
 
    - ❌ Service Account Keys: Never generate or store .json keys. Use Workload Identity Federation or the default metadata server.
-
-   - ❌ Hardcoded IDs: Never hardcode Project IDs. Use variables or a `data "google_project"` source.
 
    - ❌ Broad Scopes: Avoid cloud-platform scopes for GKE nodes; use fine-grained IAM roles instead.
 

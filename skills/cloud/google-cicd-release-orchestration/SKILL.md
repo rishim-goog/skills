@@ -87,7 +87,7 @@ gcloud deploy apply --file=clouddeploy.yaml --region=<REGION> --project=<PROJECT
 
 1. **If the user does not have runtime manifests**: Generate some basic ones based on the runtime.
     - **If Cloud Run**: Generate a Cloud Run manifest. Use `references/basic-cloudrun-manifests.md` as a reference.
-    - **If GKE**: Generate a Kubernetes `Deployment` and `Service`manifest. Use `references/basic-k8s-manifests.md` as a reference.
+    - **If GKE**: Generate a Kubernetes `Deployment` and `Service` manifest. Use `references/basic-k8s-manifests.md` as a reference.
 2. Create a `skaffold.yaml` file required to create a Cloud Deploy `Release` for the `DeliveryPipeline`.
     - Use `references/configure-skaffold.md` as a reference when generating the `skaffold.yaml` file.
     - **For multi-environment pipelines**: You must define a Skaffold profile for each Cloud Deploy target environment, named to match the target ID exactly. Do NOT use generic names like 'staging' or 'prod' for profile names unless they match the target IDs.
@@ -174,7 +174,7 @@ gcloud deploy releases create release-$DATE-$TIME --delivery-pipeline=<DELIVERY_
 
 **CRITICAL**: If the `skaffold.yaml` is not in the current directory, use the `--source` flag to specify the directory where the `skaffold.yaml` file is located.
 
-Reference documenation for `gcloud deploy releases create`: https://docs.cloud.google.com/sdk/gcloud/reference/deploy/releases/create.
+Reference documentation for `gcloud deploy releases create`: https://docs.cloud.google.com/sdk/gcloud/reference/deploy/releases/create.
 
 ### Promote a release
 

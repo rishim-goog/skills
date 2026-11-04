@@ -77,7 +77,7 @@ This workflow is for container-based applications.
 Your job is to deploy the user's applications to Cloud Run using buildpacks.
 
 1.  **Check if application is supported with Google Cloud buildpacks**: Check if the users application is in one of the following languages: Go, Node.js, Python, Java, .NET, Ruby, PHP.
-   *  **If application is in one of these languages Node.js, Go, Java, .NET, Ruby, PHP, Python it is supported by build packs. Dockerfile is not needed. Skip step 2.
+   *  **If application is in one of these languages Node.js, Go, Java, .NET, Ruby, PHP, Python it is supported by build packs.** Dockerfile is not needed. Skip step 2.
 2.  **Create Dockerfile if not supported by buildpacks**: If the users application is not supported by buildpacks, as found in step 1, look up how to build a Dockerfile. Then create a multistage Dockerfile to containerize the application. Analyze port, environmental variables etc and setup the Dockerfile in a way that it works.
 3.  **Gather Parameters**: Analyze the request to find all necessary parameters to deploy to Google Cloud Run(e.g., `repo_name: "my-app-images"`).
 4.  **Clarify if Needed**: If any mandatory parameters are missing to deploy to Google Cloud Run, you MUST ask the user for them before proceeding. Do not guess or make assumptions. Ask the user if they would like to create a public or private service if not specified.
