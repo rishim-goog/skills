@@ -39,3 +39,9 @@ skillActivationTasks:
   - instruction: Deploy my app to GKE and make sure its public.
   - instruction: i want to deploy to cloud run from source code
   - instruction: Can you guide me through deploying a containerized app to GCP?
+  - instruction: Build and deploy the application located in https://github.com/my-org/my-app to my GCP development environment
+  - instruction: Build and deploy the agent located in https://github.com/my-org/my-agent to my GCP development environment
+  - instruction: Generate a deployment configuration file based on the services enabled in my GCP environment.
+  - instruction: Generate a deployment configuration for my GCP environment, I am using Developer Connect, Cloud Build, Artifact Registry, and Cloud Run services.
+  - instruction: Deploy the application I've generated to my development environment
+  - instruction: Deploy the agent I've generated to my development environment

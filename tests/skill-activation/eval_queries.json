@@ -41,6 +41,30 @@
       "should_trigger": true
     },
     {
+      "query": "Build and deploy the application located in https://github.com/my-org/my-app to my GCP development environment",
+      "should_trigger": true
+    },
+    {
+      "query": "Build and deploy the agent located in https://github.com/my-org/my-agent to my GCP development environment",
+      "should_trigger": true
+    },
+    {
+      "query": "Generate a deployment configuration file based on the services enabled in my GCP environment.",
+      "should_trigger": true
+    },
+    {
+      "query": "Generate a deployment configuration for my GCP environment, I am using Developer Connect, Cloud Build, Artifact Registry, and Cloud Run services.",
+      "should_trigger": true
+    },
+    {
+      "query": "Deploy the application I've generated to my development environment",
+      "should_trigger": true
+    },
+    {
+      "query": "Deploy the agent I've generated to my development environment",
+      "should_trigger": true
+    },
+    {
       "query": "I need to design a CI/CD pipeline for my project.",
       "should_trigger": false
     },
