@@ -293,8 +293,16 @@ tasks:
     agentWorkingDir: /workspace/restricted-app
 
     graders:
+      - type: deterministic
+        weight: 0.40
+        run: >
+          python3 /workspace/scripts/validate-error-handling.py
+          --workspace=/workspace/restricted-app
+          --project-id="${PROJECT_ID}"
+          --region="${REGION}"
+          --prohibited-service="restricted-app-dev"
       - type: llm_rubric
-        weight: 1.0
+        weight: 0.60
         outcome_assertions:
           - The agent must read .gcp-deploy/deployment-config.json without prompting the user for pre-configured parameters.
           - When repository access or Developer Connect authentication fails, the agent must halt execution and report the exact authentication or permission error.
@@ -1185,3 +1193,160 @@ tasks:
           - A canary strategy with 25 and 75 phases must be configured on the prod stage.
           - An Automation resource with repairRolloutJob rollback must be defined in clouddeploy.yaml.
           - Observability alert policy analysis (customChecks or alertPolicies) must be configured or generated for the pipeline.
+
+  # ============================================================================
+  # AUTHENTICATION, PERMISSION & PUSH-FAILURE ERROR SUITE
+  # ============================================================================
+
+  # Error Case 1: Expired / Invalid GCP Credentials (401 UNAUTHENTICATED)
+  - name: error-gcp-unauthenticated-token
+    instruction: |
+      Build and deploy this application to my GCP development environment.
+
+    timeout: 300
+
+    trialConfig:
+      setup: |
+        scripts/setup_gcloud.sh
+        git clone -b buildpacks https://github.com/sdlc-graph/chefs-companion.git /workspace/unauth-gcp-app
+        mkdir -p /workspace/unauth-gcp-app/.gcp-deploy
+        cat <<EOF > /workspace/unauth-gcp-app/.gcp-deploy/deployment-config.json
+        {
+          "active_runtime": "Cloud Run",
+          "default_environment": "dev",
+          "fail_on_push_error": true,
+          "common_gcp_settings": {
+            "project_id": "${PROJECT_ID}",
+            "region": "${REGION}"
+          },
+          "cloud_run": {
+            "dev": {
+              "project_id": "${PROJECT_ID}",
+              "region": "${REGION}",
+              "artifact_registry": "${REGION}-docker.pkg.dev/${PROJECT_ID}/${ARTIFACT_REGISTRY}",
+              "service_name": "unauth-gcp-${_EVAL_UUID}-${_EVAL_TRIAL}",
+              "public_access": true,
+              "container_port": 8080
+            }
+          }
+        }
+        EOF
+        # Inject an expired/invalid access token so gcloud fails with 401 UNAUTHENTICATED
+        echo "ya29.expired-invalid-eval-token" > /tmp/expired_token.txt
+        gcloud config set auth/access_token_file /tmp/expired_token.txt
+
+    agentWorkingDir: /workspace/unauth-gcp-app
+
+    graders:
+      - type: deterministic
+        weight: 0.40
+        run: >
+          python3 /workspace/scripts/validate-error-handling.py
+          --workspace=/workspace/unauth-gcp-app
+      - type: llm_rubric
+        weight: 0.60
+        outcome_assertions:
+          - The agent must read .gcp-deploy/deployment-config.json without prompting the user for pre-configured settings.
+          - When gcloud returns an authentication error (Invalid authentication credentials / 401 UNAUTHENTICATED), the agent must immediately halt execution.
+          - The agent must guide the user to re-authenticate by providing the proper gcloud authentication command (e.g., gcloud auth login or gcloud auth application-default login).
+
+  # Error Case 2: Artifact Registry Push Permission Denied + fail_on_push_error: true Hard-Fail
+  - name: error-artifact-registry-push-denied
+    instruction: |
+      Deploy this application to my GCP development environment.
+
+    timeout: 300
+
+    trialConfig:
+      setup: |
+        scripts/setup_gcloud.sh
+        git clone -b no-dockerfile https://github.com/sdlc-graph/chefs-companion.git /workspace/ar-denied-app
+        mkdir -p /workspace/ar-denied-app/.gcp-deploy
+        cat <<EOF > /workspace/ar-denied-app/.gcp-deploy/deployment-config.json
+        {
+          "active_runtime": "Cloud Run",
+          "default_environment": "dev",
+          "fail_on_push_error": true,
+          "common_gcp_settings": {
+            "project_id": "${PROJECT_ID}",
+            "region": "${REGION}"
+          },
+          "cloud_run": {
+            "dev": {
+              "project_id": "${PROJECT_ID}",
+              "region": "${REGION}",
+              "artifact_registry": "${REGION}-docker.pkg.dev/restricted-unowned-project-000/locked-repo",
+              "service_name": "ar-denied-${_EVAL_UUID}-${_EVAL_TRIAL}",
+              "public_access": true,
+              "container_port": 8080
+            }
+          }
+        }
+        EOF
+
+    agentWorkingDir: /workspace/ar-denied-app
+
+    graders:
+      - type: deterministic
+        weight: 0.50
+        run: >
+          python3 /workspace/scripts/validate-error-handling.py
+          --workspace=/workspace/ar-denied-app
+          --project-id="${PROJECT_ID}"
+          --region="${REGION}"
+          --prohibited-service="ar-denied-${_EVAL_UUID}-${_EVAL_TRIAL}"
+      - type: llm_rubric
+        weight: 0.50
+        outcome_assertions:
+          - Because fail_on_push_error is true, when accessing or pushing to the configured Artifact Registry repository fails with PERMISSION_DENIED, the agent must immediately fail and halt the deployment.
+          - The agent must NOT bypass Artifact Registry by deploying via buildpacks (--source) or pushing to a different registry.
+          - The agent must report the exact permission error and suggest a corrective gcloud IAM command (such as granting roles/artifactregistry.writer).
+
+  # Error Case 3: GKE Cluster Authentication / Access Failure (Scenario #2 Error Case)
+  - name: error-gke-cluster-auth-denied
+    instruction: |
+      Build and deploy this application to my GCP development environment.
+
+    timeout: 300
+
+    trialConfig:
+      setup: |
+        scripts/setup_gcloud.sh
+        git clone -b no-dockerfile https://github.com/sdlc-graph/chefs-companion.git /workspace/gke-denied-app
+        mkdir -p /workspace/gke-denied-app/.gcp-deploy
+        cat <<EOF > /workspace/gke-denied-app/.gcp-deploy/deployment-config.json
+        {
+          "active_runtime": "GKE",
+          "default_environment": "dev",
+          "fail_on_push_error": true,
+          "common_gcp_settings": {
+            "project_id": "${PROJECT_ID}",
+            "region": "${REGION}"
+          },
+          "gke": {
+            "dev": {
+              "project_id": "restricted-unowned-gke-project-000",
+              "cluster_location": "${REGION}",
+              "cluster_name": "unauthorized-gke-cluster",
+              "namespace": "dev",
+              "artifact_registry": "${REGION}-docker.pkg.dev/${PROJECT_ID}/${ARTIFACT_REGISTRY}",
+              "manifest_path": "./kubernetes-manifests/"
+            }
+          }
+        }
+        EOF
+
+    agentWorkingDir: /workspace/gke-denied-app
+
+    graders:
+      - type: deterministic
+        weight: 0.40
+        run: >
+          python3 /workspace/scripts/validate-error-handling.py
+          --workspace=/workspace/gke-denied-app
+      - type: llm_rubric
+        weight: 0.60
+        outcome_assertions:
+          - The agent must read .gcp-deploy/deployment-config.json and target GKE without prompting the user for pre-configured settings.
+          - When gcloud container clusters get-credentials or cluster access fails with a permission/authentication error, the agent must halt execution and report the error.
+          - The agent must suggest the proper corrective gcloud command (e.g., gcloud container clusters get-credentials or granting roles/container.developer).
