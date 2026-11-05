@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Configure CI/CD and Deployment Defaults (deployment-config.json) | Google Cloud Documentation</title>
+  <style>
+    :root {
+      --gcp-blue: #1a73e8;
+      --gcp-blue-subtle: #e8f0fe;
+      --text-primary: #202124;
+      --text-secondary: #5f6368;
+      --bg-page: #f8f9fa;
+      --bg-surface: #ffffff;
+      --bg-code: #f1f3f4;
+      --border-color: #dadce0;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 32px 20px 64px;
+      font-family: -apple-system, BlinkMacSystemFont, "Google Sans", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      color: var(--text-primary);
+      background-color: var(--bg-page);
+      line-height: 1.6;
+    }
+    .container {
+      max-width: 980px;
+      margin: 0 auto;
+    }
+    .card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 28px 32px;
+      margin-bottom: 24px;
+      box-shadow: 0 1px 2px rgba(60,64,67,0.06);
+    }
+    .breadcrumbs {
+      font-size: 13px;
+      color: var(--text-secondary);
+      margin-bottom: 12px;
+    }
+    .breadcrumbs a {
+      color: var(--gcp-blue);
+      text-decoration: none;
+    }
+    .breadcrumbs a:hover { text-decoration: underline; }
+    h1 {
+      font-size: 28px;
+      line-height: 1.3;
+      margin: 0 0 12px;
+      color: var(--text-primary);
+    }
+    h2 {
+      font-size: 22px;
+      margin: 0 0 14px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--border-color);
+      color: var(--text-primary);
+    }
+    h3 {
+      font-size: 18px;
+      margin: 24px 0 10px;
+      color: var(--text-primary);
+    }
+    h4 {
+      font-size: 15px;
+      margin: 18px 0 8px;
+      color: var(--text-primary);
+    }
+    p, li {
+      font-size: 14.5px;
+      color: var(--text-primary);
+    }
+    .muted { color: var(--text-secondary); }
+    code {
+      font-family: "Roboto Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 13px;
+      background: var(--bg-code);
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+    pre {
+      background: #1e293b;
+      color: #f8fafc;
+      padding: 16px 18px;
+      border-radius: 8px;
+      overflow-x: auto;
+      font-family: "Roboto Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 13px;
+      line-height: 1.55;
+      margin: 10px 0 16px;
+    }
+    pre code {
+      background: transparent;
+      padding: 0;
+      color: inherit;
+    }
+    .note {
+      background: var(--gcp-blue-subtle);
+      border-left: 4px solid var(--gcp-blue);
+      padding: 14px 18px;
+      border-radius: 0 8px 8px 0;
+      margin: 16px 0;
+      font-size: 14px;
+    }
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 16px;
+      margin: 16px 0;
+    }
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+      gap: 16px;
+      margin: 16px 0;
+    }
+    .subcard {
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 16px 18px;
+      background: #fbfcfd;
+    }
+    .badge {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--gcp-blue);
+      background: var(--gcp-blue-subtle);
+      padding: 3px 8px;
+      border-radius: 4px;
+      margin-bottom: 6px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0 20px;
+      font-size: 13.5px;
+    }
+    th, td {
+      text-align: left;
+      padding: 10px 12px;
+      border: 1px solid var(--border-color);
+      vertical-align: top;
+    }
+    th {
+      background: #f1f3f4;
+      font-weight: 600;
+    }
+    .copy-btn {
+      float: right;
+      background: var(--gcp-blue);
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 6px 12px;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+    }
+    .copy-btn:hover { opacity: 0.9; }
+  </style>
+</head>
+<body>
+  <div class="container">
+
+    <div class="card">
+      <div class="breadcrumbs">
+        Google Cloud &rsaquo; Documentation &rsaquo; Get started &rsaquo;
+        <a href="https://docs.cloud.google.com/docs/get-started/developer-environment" target="_blank">Set up a local development environment</a>
+      </div>
+      <h1>Configure CI/CD and Deployment Defaults (<code>deployment-config.json</code>)</h1>
+      <div class="note">
+        <strong>Target Documentation Page:</strong>
+        <a href="https://docs.cloud.google.com/docs/get-started/developer-environment" target="_blank">https://docs.cloud.google.com/docs/get-started/developer-environment</a><br />
+        <strong>Placement:</strong> Immediately following the <em>&ldquo;Install the google-cloud-developer plugin&rdquo;</em> section (with administrator setup bullets added to <em>&ldquo;Before you begin&rdquo;</em>).
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>1. Addition to &ldquo;Before you begin&rdquo; (Administrator Prerequisites)</h2>
+      <p class="muted">Add the following items to the <strong>Before you begin</strong> section of <a href="https://docs.cloud.google.com/docs/get-started/developer-environment#before-you-begin" target="_blank">Set up a local development environment</a>:</p>
+      <ul>
+        <li>
+          <strong>Publish an organization deployment configuration (<code>deployment-config.json</code>):</strong>
+          <em>(Optional, recommended for teams)</em> Create and host a shared <code>deployment-config.json</code> file in a central Git repository (GitHub, GitLab, or Bitbucket) to define standard runtime targets (Cloud Run or GKE), Artifact Registry repositories, Developer Connect connections, and Binary Authorization policies across <code>dev</code> and <code>prod</code> environments.
+        </li>
+        <li>
+          <strong>Provision a dedicated Cloud Build service account:</strong>
+          Create a least-privilege, user-managed service account (for example, <code>cloudbuild-runner@YOUR_PROJECT_ID.iam.gserviceaccount.com</code>) rather than using the default Compute Engine service account for CI/CD triggers.
+        </li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h2>2. Configure CI/CD and deployment defaults (<code>deployment-config.json</code>)</h2>
+      <p>
+        After you install the <code>google-cloud-developer</code> plugin in <strong>Antigravity</strong>, <strong>Claude Code CLI</strong>, or <strong>Codex CLI</strong>, the Google Cloud CI/CD skills (<code>google-cicd-deploy</code>, <code>google-cicd-pipeline-design</code>, and <code>google-cicd-release-orchestration</code>) use a standardized <strong><code>deployment-config.json</code></strong> configuration file to automate container builds, supply-chain security checks, and deployments to <strong>Cloud Run</strong> and <strong>Google Kubernetes Engine (GKE)</strong>.
+      </p>
+      <p>
+        Providing a <code>deployment-config.json</code> file eliminates repetitive prompts for project IDs, regions, Artifact Registry paths, GKE cluster names, and Cloud Build settings, while enforcing your organization&rsquo;s security guardrails across <code>dev</code> and <code>prod</code> environments.
+      </p>
+
+      <h3>How agents resolve deployment configuration</h3>
+      <p class="muted">When you ask your agent to build or deploy an application, AI agent, or Model Context Protocol (MCP) server, the CI/CD skills resolve configuration in the following order:</p>
+      <div class="grid-3">
+        <div class="subcard">
+          <span class="badge">Priority 1</span>
+          <h4>Cached Workspace Configuration</h4>
+          <p class="muted">If <code>.gcp-deploy/deployment-config.json</code> (or <code>./deployment-config.json</code>) already exists in your project workspace, the agent uses it immediately without prompting you or running unnecessary network fetches.</p>
+        </div>
+        <div class="subcard">
+          <span class="badge">Priority 2</span>
+          <h4>Agent Workspace Context Files</h4>
+          <p class="muted">If no <code>deployment-config.json</code> file is present, the agent checks your agent-specific workspace instructions file (<code>GEMINI.md</code> for Antigravity/Gemini CLI, <code>CLAUDE.md</code> for Claude Code CLI, or <code>AGENTS.md</code> for Codex CLI) or your prompt.</p>
+        </div>
+        <div class="subcard">
+          <span class="badge">Priority 3</span>
+          <h4>Central Git Repo or Auto-Generation</h4>
+          <p class="muted">For new projects without local configuration, instruct the agent to either <strong>pull <code>deployment-config.json</code> from a central Git repository</strong> (GitHub, GitLab, or Bitbucket) or <strong>auto-generate <code>deployment-config.json</code></strong> from your Google Cloud project.</p>
+        </div>
+      </div>
+
+      <h3>Set up <code>deployment-config.json</code></h3>
+      <p class="muted">Choose one of the following methods to configure <code>deployment-config.json</code> in your local development environment:</p>
+
+      <div class="subcard" style="margin-bottom: 16px;">
+        <h4>Option 1: Pull <code>deployment-config.json</code> from a central Git repository (Recommended for teams)</h4>
+        <p class="muted">Platform administrators can maintain a single <code>deployment-config.json</code> in a shared Git repository on <strong>GitHub</strong>, <strong>GitLab</strong>, <strong>Bitbucket</strong>, or any Git server.</p>
+        <ol>
+          <li>
+            In your agent (<strong>Antigravity</strong>, <strong>Claude Code CLI</strong>, or <strong>Codex CLI</strong>), prompt the agent with your configuration repository URL:
+            <pre><code>Deploy my application to the dev environment using the deployment configuration in https://github.com/YOUR_ORG/YOUR_CONFIG_REPO</code></pre>
+          </li>
+          <li>
+            The agent automatically:
+            <ul>
+              <li>Fetches <code>deployment-config.json</code> using Git sparse-checkout (<code>git clone --depth 1 --filter=blob:none --sparse</code>).</li>
+              <li>If the configuration repository is private and local Git credentials are not configured, retrieves a short-lived read token via <strong>Google Cloud Developer Connect</strong> (<code>gcloud developer-connect connections git-repository-links fetch-read-token</code>) across GitHub, GitLab, or Bitbucket.</li>
+              <li>Caches the file at <code>.gcp-deploy/deployment-config.json</code>, records the source URL in <code>.gcp-deploy/config-state.json</code>, and adds <code>.gcp-deploy/</code> to <code>.gitignore</code> and <code>.dockerignore</code>.</li>
+            </ul>
+          </li>
+        </ol>
+      </div>
+
+      <div class="subcard">
+        <h4>Option 2: Auto-generate <code>deployment-config.json</code> from your Google Cloud project</h4>
+        <p class="muted">If your organization does not maintain a central configuration repository, your agent can generate a compliant <code>deployment-config.json</code> file by inspecting the APIs and resources enabled in your Google Cloud project:</p>
+        <ol>
+          <li>
+            Ensure your default project is set in the <code>gcloud</code> CLI:
+            <pre><code>gcloud config set project YOUR_PROJECT_ID</code></pre>
+          </li>
+          <li>
+            Prompt your agent:
+            <pre><code>Generate a deployment configuration file based on the services enabled in my GCP environment.</code></pre>
+            <span class="muted"><em>(Or specify a subset of services, for example: <code>"Generate a deployment configuration file that utilizes Cloud Run, Artifact Registry, Developer Connect, and Cloud Build."</code>)</em></span>
+          </li>
+          <li>
+            The agent inspects your enabled APIs (<code>gcloud services list --enabled</code>), existing Artifact Registry repositories, Developer Connect connections, Cloud Run services, and GKE clusters, and writes the resulting configuration to <code>./deployment-config.json</code> and <code>.gcp-deploy/deployment-config.json</code>.
+          </li>
+        </ol>
+      </div>
+
+      <h3>
+        <code>deployment-config.json</code> schema and example
+        <button class="copy-btn" onclick="copySchema(this)">Copy JSON</button>
+      </h3>
+      <pre id="schemaBlock"><code>{
+  "active_runtime": "Cloud Run",
+  "default_environment": "dev",
+  "fail_on_push_error": true,
+  "common_gcp_settings": {
+    "project_id": "YOUR_PROJECT_ID",
+    "region": "us-central1"
+  },
+  "cloud_run": {
+    "dev": {
+      "project_id": "YOUR_PROJECT_ID",
+      "region": "us-central1",
+      "artifact_registry": "us-central1-docker.pkg.dev/YOUR_PROJECT_ID/app-images-dev",
+      "service_name": "&lt;app-name&gt;-dev",
+      "public_access": true,
+      "container_port": 8080
+    },
+    "prod": {
+      "project_id": "YOUR_PROJECT_ID",
+      "region": "us-central1",
+      "artifact_registry": "us-central1-docker.pkg.dev/YOUR_PROJECT_ID/app-images-prod",
+      "service_name": "&lt;app-name&gt;-prod",
+      "public_access": false,
+      "container_port": 8080,
+      "require_confirmation": true,
+      "binary_authorization": "default",
+      "binary_authorization_policy": "prod-policy"
+    }
+  },
+  "gke": {
+    "dev": {
+      "project_id": "YOUR_PROJECT_ID",
+      "cluster_location": "us-central1",
+      "cluster_name": "gke-cluster-dev",
+      "namespace": "dev",
+      "artifact_registry": "us-central1-docker.pkg.dev/YOUR_PROJECT_ID/app-images-dev",
+      "manifest_path": "./kubernetes-manifests/"
+    },
+    "prod": {
+      "project_id": "YOUR_PROJECT_ID",
+      "cluster_location": "us-central1",
+      "cluster_name": "gke-cluster-prod",
+      "namespace": "prod",
+      "artifact_registry": "us-central1-docker.pkg.dev/YOUR_PROJECT_ID/app-images-prod",
+      "manifest_path": "./release/kubernetes-manifests.yaml",
+      "require_confirmation": true
+    }
+  },
+  "developer_connect_and_cloud_build": {
+    "build_mode": "Developer Connect + Cloud Build",
+    "developer_connect": {
+      "location": "us-central1",
+      "connection_id": "YOUR_DEVCONNECT_CONNECTION_ID"
+    },
+    "cloud_build_trigger": {
+      "project_id": "YOUR_PROJECT_ID",
+      "region": "us-central1",
+      "service_account": "projects/YOUR_PROJECT_ID/serviceAccounts/cloudbuild-runner@YOUR_PROJECT_ID.iam.gserviceaccount.com",
+      "default_branch": "^main$",
+      "auto_run_trigger": true
+    }
+  }
+}</code></pre>
+
+      <h3>Configuration field reference</h3>
+
+      <h4>1. Top-level and common settings</h4>
+      <table>
+        <thead>
+          <tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>active_runtime</code></td><td><code>string</code></td><td>Yes</td><td>Default target runtime when not specified in the user prompt. Allowed values: <code>"Cloud Run"</code>, <code>"GKE"</code>, or <code>"prompt"</code> (asks the developer to choose).</td></tr>
+          <tr><td><code>default_environment</code></td><td><code>string</code></td><td>Yes</td><td>Default target environment when not specified in the user prompt (<code>"dev"</code> or <code>"prod"</code>).</td></tr>
+          <tr><td><code>fail_on_push_error</code></td><td><code>boolean</code></td><td>Yes</td><td>When <code>true</code> (recommended), immediately aborts the deployment if pushing the container image to Artifact Registry fails, preventing fallback to external or public registries.</td></tr>
+          <tr><td><code>common_gcp_settings.project_id</code></td><td><code>string</code></td><td>Yes</td><td>Default Google Cloud project ID.</td></tr>
+          <tr><td><code>common_gcp_settings.region</code></td><td><code>string</code></td><td>Yes</td><td>Default Google Cloud region (for example, <code>"us-central1"</code>).</td></tr>
+        </tbody>
+      </table>
+
+      <h4>2. Cloud Run settings (<code>cloud_run.dev</code> and <code>cloud_run.prod</code>)</h4>
+      <table>
+        <thead>
+          <tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>project_id</code> / <code>region</code></td><td><code>string</code></td><td>Yes</td><td>Target Google Cloud project ID and deployment region for the Cloud Run service.</td></tr>
+          <tr><td><code>artifact_registry</code></td><td><code>string</code></td><td>Yes</td><td>Full Artifact Registry Docker repository URI (<code>&lt;REGION&gt;-docker.pkg.dev/&lt;PROJECT_ID&gt;/&lt;REPO_NAME&gt;</code>).</td></tr>
+          <tr><td><code>service_name</code></td><td><code>string</code></td><td>Yes</td><td>Naming template for the Cloud Run service. Supports <code>&lt;app-name&gt;</code> substitution derived from the Git repository or directory name (for example, <code>"&lt;app-name&gt;-dev"</code>).</td></tr>
+          <tr><td><code>public_access</code></td><td><code>boolean</code></td><td>Yes</td><td>When <code>true</code>, passes <code>--allow-unauthenticated</code>; when <code>false</code>, enforces IAM authentication (<code>--no-allow-unauthenticated</code>).</td></tr>
+          <tr><td><code>container_port</code></td><td><code>integer</code></td><td>Yes</td><td>Port on which the container listens (default: <code>8080</code>).</td></tr>
+          <tr><td><code>require_confirmation</code></td><td><code>boolean</code></td><td>Optional</td><td>When <code>true</code> (enforced on <code>prod</code>), requires explicit user confirmation before executing the deployment.</td></tr>
+          <tr><td><code>binary_authorization</code></td><td><code>string</code></td><td>Optional</td><td>Binary Authorization policy name to enforce on the Cloud Run service (for example, <code>"default"</code> on <code>prod</code> passes <code>--binary-authorization=default</code>).</td></tr>
+          <tr><td><code>binary_authorization_policy</code></td><td><code>string</code></td><td>Optional</td><td>Identifier for the Binary Authorization policy used to verify image attestations prior to <code>prod</code> deployment.</td></tr>
+        </tbody>
+      </table>
+
+      <h4>3. Google Kubernetes Engine settings (<code>gke.dev</code> and <code>gke.prod</code>)</h4>
+      <table>
+        <thead>
+          <tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>project_id</code> / <code>cluster_location</code></td><td><code>string</code></td><td>Yes</td><td>Google Cloud project ID and region/zone of the GKE cluster (for example, <code>"us-central1"</code>).</td></tr>
+          <tr><td><code>cluster_name</code></td><td><code>string</code></td><td>Yes</td><td>Name of the target GKE cluster.</td></tr>
+          <tr><td><code>namespace</code></td><td><code>string</code></td><td>Yes</td><td>Target Kubernetes namespace (<code>"dev"</code>, <code>"prod"</code>, or <code>"default"</code>). Created automatically if it does not exist.</td></tr>
+          <tr><td><code>artifact_registry</code></td><td><code>string</code></td><td>Yes</td><td>Artifact Registry Docker repository URI used for container images deployed to the cluster.</td></tr>
+          <tr><td><code>manifest_path</code></td><td><code>string</code></td><td>Yes</td><td>Local path to the Kubernetes manifest directory or file (for example, <code>"./kubernetes-manifests/"</code>).</td></tr>
+          <tr><td><code>require_confirmation</code></td><td><code>boolean</code></td><td>Optional</td><td>When <code>true</code> (enforced on <code>prod</code>), requires explicit user confirmation before applying manifests.</td></tr>
+        </tbody>
+      </table>
+
+      <h4>4. Developer Connect and Cloud Build settings (<code>developer_connect_and_cloud_build</code>)</h4>
+      <table>
+        <thead>
+          <tr><th>Field</th><th>Type</th><th>Required</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>build_mode</code></td><td><code>string</code></td><td>Yes</td><td>Set to <code>"Developer Connect + Cloud Build"</code> to enforce remote builds via Cloud Build triggers linked to your Git provider (GitHub, GitLab, or Bitbucket) instead of local Docker builds.</td></tr>
+          <tr><td><code>developer_connect.location</code> / <code>connection_id</code></td><td><code>string</code></td><td>Yes</td><td>Region and ID of the pre-configured Developer Connect connection for GitHub, GitLab, or Bitbucket.</td></tr>
+          <tr><td><code>cloud_build_trigger.project_id</code> / <code>region</code></td><td><code>string</code></td><td>Yes</td><td>Google Cloud project ID and region where the Cloud Build trigger runs.</td></tr>
+          <tr><td><code>cloud_build_trigger.service_account</code></td><td><code>string</code></td><td>Yes</td><td>Full resource name of the dedicated, user-managed Cloud Build service account (<code>projects/&lt;PROJECT_ID&gt;/serviceAccounts/&lt;SA_EMAIL&gt;</code>). Must <strong>not</strong> be the default Compute Engine service account.</td></tr>
+          <tr><td><code>cloud_build_trigger.default_branch</code></td><td><code>string</code></td><td>Yes</td><td>Branch regex pattern for the Cloud Build trigger (for example, <code>"^main$"</code>). When running the trigger manually, the agent resolves the remote repository&rsquo;s default branch and strips <code>^</code> and <code>$</code>.</td></tr>
+          <tr><td><code>cloud_build_trigger.auto_run_trigger</code></td><td><code>boolean</code></td><td>Optional</td><td>When <code>true</code>, automatically executes <code>gcloud builds triggers run</code> after creating or updating the trigger.</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Required Google Cloud APIs and IAM permissions</h3>
+      <pre><code>gcloud services enable \
+  run.googleapis.com \
+  container.googleapis.com \
+  artifactregistry.googleapis.com \
+  cloudbuild.googleapis.com \
+  developerconnect.googleapis.com \
+  binaryauthorization.googleapis.com \
+  containeranalysis.googleapis.com \
+  agentregistry.googleapis.com \
+  secretmanager.googleapis.com \
+  --project=YOUR_PROJECT_ID</code></pre>
+
+      <table>
+        <thead>
+          <tr><th>Principal</th><th>Required IAM Roles</th><th>Purpose</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Developer Identity</strong> (local <code>gcloud</code> ADC user)</td>
+            <td><code>roles/artifactregistry.admin</code><br><code>roles/cloudbuild.builds.editor</code><br><code>roles/developerconnect.admin</code><br><code>roles/run.admin</code><br><code>roles/container.developer</code><br><code>roles/iam.serviceAccountUser</code><br><code>roles/binaryauthorization.attestorsVerifier</code><br><code>roles/agentregistry.viewer</code></td>
+            <td>Allows the agent to inspect enabled services, link repositories in Developer Connect, create/run Cloud Build triggers, export SPDX SBOMs, verify Binary Authorization attestations, and deploy to Cloud Run or GKE.</td>
+          </tr>
+          <tr>
+            <td><strong>Dedicated Cloud Build Service Account</strong> (<code>cloudbuild-runner@...</code>)</td>
+            <td><code>roles/logging.logWriter</code><br><code>roles/artifactregistry.writer</code><br><code>roles/developerconnect.tokenAccessor</code><br><code>roles/run.developer</code><br><code>roles/container.developer</code><br><code>roles/storage.admin</code><br><code>roles/serviceusage.serviceUsageConsumer</code></td>
+            <td>Executes remote container builds with <code>logging: CLOUD_LOGGING_ONLY</code>, pushes images to Artifact Registry, and deploys build artifacts.</td>
+          </tr>
+          <tr>
+            <td><strong>Cloud Build Service Agent</strong> (<code>service-PROJECT_NUMBER@gcp-sa-cloudbuild.iam.gserviceaccount.com</code>)</td>
+            <td><code>roles/cloudbuild.serviceAgent</code><br><code>roles/developerconnect.tokenAccessor</code><br><code>roles/iam.serviceAccountUser</code> (on <code>cloudbuild-runner@...</code>)</td>
+            <td>Allows Cloud Build to access Developer Connect repository links across GitHub, GitLab, and Bitbucket and act as the dedicated build service account.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>Built-in security and operational guardrails</h3>
+      <div class="grid-2">
+        <div class="subcard">
+          <h4>Remote CI/CD Execution (<code>CLOUD_LOGGING_ONLY</code> &amp; <code>--inline-config</code>)</h4>
+          <p class="muted">Links your GitHub, GitLab, or Bitbucket repository to Developer Connect and builds on Cloud Build using your dedicated service account with <code>options: { logging: CLOUD_LOGGING_ONLY }</code>. Automatically synthesizes an <code>--inline-config</code> payload if <code>Dockerfile</code> or <code>cloudbuild.yaml</code> is not yet committed to your remote default branch.</p>
+        </div>
+        <div class="subcard">
+          <h4>Pre-Build Secret Interception</h4>
+          <p class="muted">Scans your workspace for <code>.env</code> files, private keys (<code>*.pem</code>, <code>*.key</code>), service account JSON keys, and hardcoded secrets in <code>Dockerfile</code> <code>ENV</code>/<code>ARG</code> instructions before building. Excludes sensitive files via <code>.dockerignore</code> and <code>.gcloudignore</code> and recommends <strong>Google Cloud Secret Manager</strong> (<code>--set-secrets</code>).</p>
+        </div>
+        <div class="subcard">
+          <h4>SPDX SBOM Generation &amp; Binary Authorization (<code>prod</code>)</h4>
+          <p class="muted">Exports an SPDX Software Bill of Materials (<code>gcloud artifacts sbom export</code>) for built images and enforces Binary Authorization (<code>--binary-authorization=default</code>) on <code>prod</code> Cloud Run deployments&mdash;verifying cryptographic attestations prior to rollout and diagnosing <code>IMAGE_UNTRUSTED</code> policy violations with exact remediation commands.</p>
+        </div>
+        <div class="subcard">
+          <h4>Automatic Agent Registry Registration</h4>
+          <p class="muted">Detects AI Agents (<code>google-adk</code>, <code>langchain</code>, <code>langgraph</code>, <code>crewai</code>, <code>autogen</code>) and MCP Servers (<code>mcp</code>, <code>fastmcp</code>, <code>@modelcontextprotocol/sdk</code>) and automatically applies Google Cloud Agent Registry discovery labels on Cloud Run and GKE.</p>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    function copySchema(btn) {
+      const text = document.getElementById('schemaBlock').innerText;
+      navigator.clipboard.writeText(text).then(() => {
+        btn.innerText = 'Copied!';
+        setTimeout(() => { btn.innerText = 'Copy JSON'; }, 2000);
+      });
+    }
+  </script>
+</body>
+</html>
