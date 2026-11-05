@@ -1,6 +1,6 @@
 # IAM and Security Standards for GCP
 
-Prevent outages and security breaches by following additive IAM patterns and leveraging Workload Identity.
+Prevent outages and security breaches by following additive IAM patterns, dedicated CI/CD service accounts, and Workload Identity.
 
 ## 🚫 Additive vs. Authoritative IAM
 **NEVER** use authoritative resources (`google_project_iam_policy` or `google_project_iam_binding`) for core projects unless you are explicitly managing the *entire* policy and understand the risk of lockouts.
@@ -20,8 +20,46 @@ resource "google_project_iam_member" "storage_admin" {
 }
 ```
 
-## 🆔 Workload Identity (GKE)
-Bind Kubernetes Service Accounts (KSA) to Google Service Accounts (GSA) without managing JSON keys.
+## 🔐 CI/CD Pipeline Service Accounts (Cloud Build, Developer Connect, Artifact Registry & Binary Authorization)
+
+Never use the legacy default Cloud Build service account (`<PROJECT_NUMBER>@cloudbuild.gserviceaccount.com`) for production triggers. Provision a dedicated Cloud Build runner service account (`cloudbuild-runner`) with least-privilege additive IAM roles:
+
+```hcl
+resource "google_service_account" "cloudbuild_runner" {
+  project      = var.project_id
+  account_id   = "cloudbuild-runner"
+  display_name = "Dedicated Cloud Build Runner Service Account"
+}
+
+locals {
+  cloudbuild_runner_roles = [
+    "roles/logging.logWriter",                    # Required for CLOUD_LOGGING_ONLY
+    "roles/artifactregistry.writer",              # Push images & export SPDX SBOMs
+    "roles/developerconnect.readTokenAccessor",   # Fetch read tokens for GitHub/GitLab/Bitbucket
+    "roles/run.admin",                            # Deploy to Cloud Run
+    "roles/container.developer",                  # Deploy to GKE clusters
+    "roles/iam.serviceAccountUser",               # Act as runtime service accounts
+    "roles/binaryauthorization.attestorsVerifier" # Verify Binary Authorization attestors on prod
+  ]
+}
+
+resource "google_project_iam_member" "cloudbuild_runner_permissions" {
+  for_each = toset(local.cloudbuild_runner_roles)
+  project  = var.project_id
+  role     = each.value
+  member   = "serviceAccount:${google_service_account.cloudbuild_runner.email}"
+}
+
+# Grant Cloud Build Service Agent permission to read Developer Connect repository links
+resource "google_project_iam_member" "cloudbuild_service_agent_devconnect" {
+  project = var.project_id
+  role    = "roles/developerconnect.admin"
+  member  = "serviceAccount:service-${var.project_number}@gcp-sa-cloudbuild.iam.gserviceaccount.com"
+}
+```
+
+## 🆔 Workload Identity (GKE & Agent Registry SPIFFE Identity)
+Bind Kubernetes Service Accounts (KSA) to Google Service Accounts (GSA) without managing JSON keys. For AI Agents and MCP Servers on GKE, pair Workload Identity with the `iam.gke.io/spiffe-identity-type: "agent-identity"` pod template annotation for Google Cloud Agent Registry discovery.
 
 ```hcl
 # 1. The Google Service Account

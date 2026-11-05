@@ -189,3 +189,20 @@ gcloud builds triggers run <TRIGGER_ID> \
   --project=<PROJECT_ID> \
   --branch="${DEFAULT_BRANCH}"
 ```
+
+---
+
+## Troubleshooting Authentication, Permission & Trigger Errors
+
+When creating or running a Developer Connect + Cloud Build trigger fails, diagnose the exact root cause and never bypass the error by switching to local Docker builds or the default Compute Engine service account:
+
+1.  **`INVALID_ARGUMENT: if 'build.service_account' is specified, the build must either (a) specify 'build.logs_bucket', (b) use the CLOUD_LOGGING_ONLY logging option, or (c) use the NONE logging option`**:
+    *   **Cause**: A custom `--service-account` is configured on the trigger, but the `cloudbuild.yaml` (or `--inline-config`) omits `options: { logging: CLOUD_LOGGING_ONLY }`.
+    *   **Fix**: Add `options: { logging: CLOUD_LOGGING_ONLY }` to `cloudbuild.yaml` (or `--inline-config`) and ensure the custom service account has `roles/logging.logWriter`.
+2.  **`PERMISSION_DENIED` when linking a repository or fetching a read token (`developerconnect.gitRepositoryLinks.fetchReadToken` / `developerconnect.gitRepositoryLinks.create`)**:
+    *   **Cause**: Either the caller lacks `roles/developerconnect.readTokenAccessor` / `roles/developerconnect.admin`, or the GitHub/GitLab/Bitbucket App installation in Developer Connect does not have access to the target repository.
+    *   **Fix**: Grant `roles/developerconnect.readTokenAccessor` (or `roles/developerconnect.admin`) to the caller and verify the repository is authorized in the Developer Connect connection settings.
+3.  **`PERMISSION_DENIED: Caller does not have required permission to use service account ...` (`iam.serviceAccounts.actAs`)**:
+    *   **Cause**: The caller or Cloud Build Service Agent lacks `roles/iam.serviceAccountUser` on the dedicated Cloud Build service account (`<SA_NAME>@<PROJECT_ID>.iam.gserviceaccount.com`).
+    *   **Fix**: Run `gcloud iam service-accounts add-iam-policy-binding <SA_NAME>@<PROJECT_ID>.iam.gserviceaccount.com --member="<CALLER_OR_P4SA>" --role="roles/iam.serviceAccountUser" --project=<PROJECT_ID>`.
+

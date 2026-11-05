@@ -1,61 +1,84 @@
 ---
 name: author-evals
 description: >
-  Use this skill to author and debug evaluations for skillgrade, including eval.yaml, grader scripts, environment variables, and test project setup.
-  **Why**: Ensures evaluations are reliable, isolated, and accurately measure agent capabilities without implementation bias.
+  Use this skill to author and debug evaluations for skillgrade across Gemini, Anthropic Claude, and OpenAI (Codex) models, including eval.yaml, deterministic and error-handling grader scripts, environment variables, and test project setup.
+  **Why**: Ensures evaluations are reliable, isolated, multi-model compatible, and accurately measure agent capabilities (including both positive workflows and negative/error-handling cases) without implementation bias.
   **When**:
   - When creating new evaluation tasks or graders.
+  - When ensuring evaluations work across Gemini (`gemini`), Anthropic Claude (`claude`), and OpenAI (`codex`) models.
   - When debugging failed evaluations (use along with `improve-skills` to determine if the fix belongs in the eval or the skill).
-  - When refining instructions or workspace isolation in `eval.yaml`.
+  - When refining instructions or workspace isolation in `eval.yaml` or `eval.criteria.yaml`.
 ---
 
 # Authoring Evals for SkillGrade
 
-This skill provides guidelines and best practices for authoring evaluations using the `skillgrade` tool. Evaluations are defined in an `eval.yaml` file and used to test agent capabilities.
+This skill provides guidelines and best practices for authoring evaluations using the `skillgrade` tool across **Gemini (`gemini`)**, **Anthropic Claude (`claude`)**, and **OpenAI (`codex`)** models. Evaluations are defined in `eval.yaml` and `eval.criteria.yaml`.
 
 ## Identifying Target Skills
 
-When authoring an evaluation, first ask the user which skill (or skills) should be evaluated.
+When authoring an evaluation, first identify which skill (or skills) should be evaluated.
 The skills are located in the `./skills` directory for the project.
-This information is crucial for determining what evaluation cases would be useful.
+This information is crucial for determining what evaluation cases (both positive workflows and negative/authentication error scenarios) would be useful.
 
 ## Generating Eval Cases
 
-The skill should support generating/suggesting and generating multiple evaluation cases to ensure the skill is well tested.
-A single task is usually not enough. Aim for 3-5 distinct tasks that cover different aspects of the skill.
+Aim for comprehensive evaluation coverage across both happy-path and error-handling scenarios:
+- **Positive Workflow Tasks**: Test core capabilities, configuration discovery/generation, multi-provider Git integrations (GitHub, GitLab, Bitbucket), runtime targets (Cloud Run, GKE), workload types (Web apps, AI Agents, MCP Servers), and supply-chain security (SPDX SBOMs, Binary Authorization, secret leak interception).
+- **Authentication, Permission & Security Error Tasks**: Test how the agent behaves when credentials expire (`401`), IAM roles are missing (`403 PERMISSION_DENIED`), private Git repositories lack tokens, Cloud Build custom service accounts are misconfigured, Binary Authorization blocks an unattested image (`IMAGE_UNTRUSTED`), or GKE RBAC denies access. Verify the agent diagnoses the exact root cause, provides actionable remediation, and **never bypasses security controls** or fabricates deployment URLs.
 
-## Eval Configuration (`eval.yaml`)
+## Multi-Model Compatibility (`gemini`, `claude`, `codex`)
 
-The `eval.yaml` file defines the tasks, environment, and graders for evaluation.
+All evaluations in this repository must work seamlessly across **Google Gemini (`gemini`)**, **Anthropic Claude (`claude`)**, and **OpenAI (`codex`)**:
+
+1. **Mirror Workspace Context Files**:
+   Different agent CLIs read project context from different filenames:
+   - Gemini CLI reads `/root/.gemini/GEMINI.md` and `./GEMINI.md`
+   - Claude Code CLI reads `./CLAUDE.md`
+   - OpenAI Codex CLI reads `./AGENTS.md`
+   Always populate all four files with identical project context (`PROJECT_ID`, `REGION`, `DEVCONNECT_CONNECTION_ID`) in every task's `workspace:` section (or via YAML anchors like `*multi_model_context`).
+2. **Pass Multi-Model API Keys in `defaults.env`**:
+   Include `GEMINI_API_KEY`, `OPENAI_API_KEY`, and `ANTHROPIC_API_KEY` in `defaults.env` and `Dockerfile.eval`.
+3. **Model-Agnostic Graders**:
+   Deterministic graders (`scripts/validate-*.py`, `scripts/validate-*.sh`) must inspect **GCP state, workspace files, and `deployment-error-diagnosis.md`** rather than parsing model-specific CLI session log formats.
+
+## Eval Configuration (`eval.yaml` / `eval.criteria.yaml`)
+
+The `eval.yaml` and `eval.criteria.yaml` files define the tasks, environment, and graders for evaluation.
 
 ### Key Sections
 
 - **`defaults`**: Set base configuration for all tasks.
-    - `agent`: Model to use (e.g., `gemini`).
+    - `agent`: Default model to use (`gemini`; overridden at runtime via `--agent=claude` or `--agent=codex`).
     - `provider`: Execution environment (`docker` or `local`).
-    - `docker`: Base image and setup commands.
-    - `env`: Base environment variables.
-    - `environment.mounts`: Bind mounts for Docker.
+    - `docker`: Base image and setup commands (`Dockerfile.eval` pre-installs `@google/gemini-cli`, `@anthropic-ai/claude-code`, `@openai/codex`, `gcloud`, `kubectl`, `terraform`, `gh`, `glab`).
+    - `env`: Base environment variables (`PROJECT_ID`, `REGION`, `GEMINI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`).
+    - `environment.mounts`: Bind mounts for Docker (`~/.config/gcloud`).
 - **`tasks`**: List of evaluation tasks.
     - `name`: Unique task name.
-    - `instruction`: Clear instructions for the agent, including expected output file names.
+    - `instruction`: Clear instructions for the agent, including expected output file names (e.g., `deployment-config.json`, `deployment-error-diagnosis.md`).
     - `workspace`: Files to include in the container. Use isolation; do not assume files are present.
     - `trialConfig`: Setup and cleanup hooks for each trial.
     - `graders`: Graders used to evaluate performance.
 
 ### Workspace Isolation
 
-By default, **no files are auto-included** in the execution environment. You must explicitly specify all files and directories needed for the task in the `workspace` section.
+By default, **no files are auto-included** in the execution environment. You must explicitly specify all files and directories needed for the task in the `workspace` section:
 
-Example:
 ```yaml
 workspace:
   - src: fixtures/broken-app.js
     dest: app.js
-  - content: |
-      # Gemini Custom Instructions
-      Always use TypeScript for new files.
+  - content: &context_doc |
+      # Project Context
+      PROJECT_ID=${PROJECT_ID}
+      REGION=${REGION}
     dest: /root/.gemini/GEMINI.md
+  - content: *context_doc
+    dest: GEMINI.md
+  - content: *context_doc
+    dest: CLAUDE.md
+  - content: *context_doc
+    dest: AGENTS.md
 ```
 
 ## Graders
@@ -77,7 +100,7 @@ Deterministic graders run a script or command and evaluate the outcome objective
       echo '{"score": 0.0, "details": "Output file missing"}'
     fi
     ```
-- **Rule**: Use `awk` for arithmetic instead of `bc`, as `bc` is not available in standard `node:20-slim` images.
+- **Rule**: Use `awk` or `python3` for arithmetic instead of `bc`, as `bc` is not available in standard `node:20-slim` images.
 
 ### 2. LLM Rubric Graders
 
@@ -133,104 +156,61 @@ When evaluations interact with cloud resources (like Google Cloud in this projec
 Suggest minimal permissions required for the test:
 - **Storage Admin** for GCS bucket operations.
 - **Cloud Run Admin** for service deployments.
-- **Artifact Registry Admin** for image uploads.
+- **Artifact Registry Admin** for image uploads and SBOM exports.
+- **Cloud Build Editor** & **Developer Connect Admin** for CI/CD trigger evaluations.
+- **Kubernetes Engine Developer** for GKE evaluations.
 
 Advise the user to use limited service accounts rather than Owner roles.
 
 ### Setup and Cleanup Scripts
 
-- **Setup scripts**: Clone necessary repositories, install dependencies, or provision base resources.
-- **Cleanup scripts**: Crucial for deleting resources created during the evaluation (e.g., GCS buckets, Cloud Run services) to avoid leaks and costs.
+- **Setup scripts**: Clone necessary repositories, install dependencies, or provision base resources (`scripts/setup-eval-env.sh`).
+- **Cleanup scripts**: Crucial for deleting resources created during the evaluation (e.g., GCS buckets, Cloud Run services, GKE deployments, Cloud Build triggers) to avoid leaks and costs.
 
-Example Cleanup script in task:
-```yaml
-trialConfig:
-  cleanup: scripts/teardown-gcs.sh gs://${_EVAL_UUID}-${_EVAL_TRIAL}
-```
+## Running Evaluations (Single-Model & Multi-Model)
 
-## Running Evaluations
-
-To run an evaluation, you can use the `skillgrade` tool.
-
-1.  **Export API Key**: Ensure the `GEMINI_API_KEY` environment variable is exported and available.
-2.  **Run Command**: Use the following command to run a specific evaluation:
+1.  **Export API Keys**: Export `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, and/or `OPENAI_API_KEY`.
+2.  **Run Multi-Model Runner (Recommended)**:
     ```bash
-    skillgrade --no-redact --save-trial-workspace --eval=<name of eval>
+    ./scripts/run-multi-model-evals.sh --config eval.criteria.yaml --models gemini,claude,codex
     ```
-
-The results will be available under your output directory (default is `$TMPDIR/skillgrade/<skill-name>/results`, or a GCS bucket if `--output=gs://...` was used).
+    *(On a Google Cloudtop without Docker daemon, pass `--provider local`.)*
+3.  **Run Single-Model `skillgrade` Command**:
+    ```bash
+    npx skillgrade --config eval.criteria.yaml --agent gemini --no-redact --save-trial-workspace
+    ```
 
 ### Debugging Running Evaluations
 
-While an evaluation is running, you can use standard Docker commands to inspect the environment and agent behavior:
+While an evaluation is running in Docker, you can use standard Docker commands to inspect the environment and agent behavior:
 
 1.  **Find Container ID**: Use `docker ps` to find the container ID of the running trial.
 2.  **Interactive Shell**: Get an interactive shell in the container:
     ```bash
     docker exec -it <container_id> sh
     ```
-3.  **Inspect Processes**: Inside the container, run `ps -ax` to see the Gemini CLI invocation and running tools/MCP servers.
-4.  **Tail Logs**: To follow the agent's JSON stream logs in real-time inside the container:
-    ```bash
-    ls -t ~/.gemini/tmp/*/chats/session-*.json | head -n 1 | xargs tail -f
-    ```
-5.  **Keep Container Alive**: To keep the container running longer for inspection, add a `sleep` command to the `trialConfig.cleanup` section in `eval.yaml`:
-    ```yaml
-    trialConfig:
-      cleanup: |
-        scripts/cleanup.sh
-        sleep 100
-    ```
+3.  **Inspect Processes**: Inside the container, run `ps -ax` to see the agent CLI invocation (`gemini`, `claude`, or `codex`) and running tools/MCP servers.
 
 ### Debugging Failed Evaluations with Saved Workspaces
 
-When an evaluation failure occurs, debugging can be improved by inspecting the workspace files generated by the agent during the trial.
-
 1.  **Enable Saved Workspaces**: Use the `--save-trial-workspace` flag when running `skillgrade` to persist the trial workspace.
-2.  **Locate Workspace**: The persisted workspaces will be available under the `workspaces/` directory in your output directory (default is `$TMPDIR/skillgrade/<skill-name>/workspaces/...`). Note that the output directory can be a GCS bucket (e.g., `gs://my-bucket/prefix`). If saved to GCS, you must download the archive locally to extract and inspect it.
+2.  **Locate Workspace**: The persisted workspaces will be available under the `workspaces/` directory in your output directory.
 3.  **Inspect and Validate**:
     -   Look at files generated or modified by the agent/skill.
     -   Run validation scripts manually against the saved workspace to understand why they failed.
-    -   Inspect how validation scripts can be improved to better test the outcome.
-
-This is particularly useful for verifying that the agent produced the correct output files and for iterating on deterministic graders.
 
 ## Best Practices
 
-- **Grade outcomes, not steps.** Check that the file was fixed, not that the agent ran a specific command.
-- **Instructions must name output files.** The grader must know what to check.
-- **Start small.** 3-5 well-designed tasks beat 50 noisy ones.
+- **Grade outcomes, not steps.** Check that the file or cloud resource was created/diagnosed accurately, not that the agent ran a specific internal tool.
+- **Instructions must name output files.** The grader must know what to check (e.g., `deployment-config.json`, `deployment-error-diagnosis.md`).
+- **Maintain cross-model parity.** Never rely on features exclusive to one agent CLI when authoring tasks or graders.
 
 ## Improving Evals based on Results
 
-This process outlined in this section is for analyzing evaluation results to improve the core instructions and setup of the eval itself, rather than the skill file.
-
-### Workflow
-
 1.  **Gather Results**: Locate the evaluation results (local or GCS).
-2.  **Analyze Logs**: Look at the agent JSON stream and execution logs.
+2.  **Analyze Logs**: Look at the agent execution logs across `gemini`, `claude`, and `codex`.
 3.  **Identify Inefficiencies**:
     - Is the agent looping?
-    - Is it trying out unnecessary tools not directly related to the skill?
     - Are the instructions ambiguous?
-    - **Handle Environment Issues**: If the failure was caused by the test environment (e.g., missing IAM permissions, disabled APIs, missing tools), write a local file (e.g., `ENV_ISSUES.md`) to the workspace root detailing the issue and required action, and do not update the eval to fix it unless the eval setup itself is flawed.
-4.  **Formulate Improvements**:
-    - Suggest a better set of `GEMINI.md` or agent instructions (either base instructions available to all evals or per-eval instructions).
-    - Refine instructions to be more specific about expected outcomes or file names.
-    - Adjust the `eval.yaml` configuration (e.g., workspace, timeouts) if needed.
-    - Suggest updates to `eval.yaml` to remove requirements that conflict with mandatory tool capabilities, rather than forcing agents to bypass tools.
-5.  **Rule of No Tool Bias**: When improving eval instructions based on results, do NOT force the agent to use specific skills or tools. Eval instructions must test the outcome, not the specific steps or tools used. For example, check that a file was fixed, not that a specific linting tool was run.
-6.  **Rule of No Implementation Bias (Avoid Overfitting)**: Avoid over-constraining instructions with specific implementation steps (e.g., 'must be defined as a resource in your Terraform') just to pass a rigid deterministic grader. Instructions must focus on high-level patterns and outcomes required by the skill, allowing the agent to make logical decisions based on context (e.g., whether to create new resources or reference existing ones), rather than forcing a specific path that leads to overfitting.
-7.  **Differentiate from Skill Improvement**: Remember that `improve-skills` is for improving the *skill itself* (making it more robust). This skill is for improving the *eval setup* to make testing more effective and efficient.
-
-## Relationship with `improve-skills`
-
-The `author-evals` and `improve-skills` skills are related and often used together:
-- `author-evals` focuses on authoring and improving **evaluation configurations and instructions**.
-- `improve-skills` focuses on improving the **skills themselves** based on eval results.
-
-When an evaluation failure occurs, analyze whether it is due to:
-- An **eval flaw** (unclear instructions, wrong setup) → Use `author-evals` to improve the eval.
-- A **skill gap** (missing instructions, lack of best practices in the skill) → Use `improve-skills` to improve the skill file.
-
-Be aware that both might be needed to achieve high-quality results.
+    - **Handle Environment Issues**: If the failure was caused by the test environment (e.g., missing IAM permissions, disabled APIs, expired ADC), write `ENV_ISSUES.md` to the workspace root detailing the issue and required action, and do not update the eval to fix it unless the eval setup itself is flawed.
+4.  **Rule of No Tool Bias & No Implementation Bias**: Eval instructions must test the outcome, not force specific internal tool names or rigid implementation details that lead to overfitting.

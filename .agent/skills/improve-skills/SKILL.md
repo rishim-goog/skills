@@ -1,62 +1,56 @@
 ---
 name: improve-skills
 description: >
-  Use this skill to analyze evaluation results to identify gaps and improve skills with general-purpose updates. Avoids biasing updates solely for evaluation success.
-  **Why**: Encodes best practices for skill improvement that prevent overfitting to specific evaluations, ensuring skills remain robust and broadly applicable. It helps differentiate between skill gaps and environment issues.
+  Use this skill to analyze evaluation results across Gemini, Claude, and OpenAI (Codex) models to identify gaps and improve skills with general-purpose updates. Avoids biasing updates solely for evaluation success.
+  **Why**: Encodes best practices for skill improvement that prevent overfitting to specific evaluations or single-model quirks, ensuring skills remain robust, portable, and broadly applicable. It helps differentiate between skill gaps and environment issues.
   **When**:
   - After completing an evaluation run to analyze failures (use along with `author-evals` to determine if the fix belongs in the skill or the eval).
-  - When identifying a need to generalize a solution beyond a specific test case.
-  - When updating skills to improve clarity and coverage of edge cases.
+  - When identifying a need to generalize a solution beyond a specific test case or across multiple LLM families (`gemini`, `claude`, `codex`).
+  - When updating skills and their `references/` deep docs to improve clarity and coverage of edge cases and error handling.
 ---
 
 # Skill Improvement from Evaluation Analysis
 
-This skill outlines the process for analyzing evaluation results to improve the core skills used by the agent. It emphasizes making robust, general improvements rather than "hacking" the skills to pass specific evaluation checks.
+This skill outlines the process for analyzing evaluation results to improve the core skills (`SKILL.md` and `references/` deep docs) used by the agent. It emphasizes making robust, general improvements rather than "hacking" the skills to pass specific evaluation checks.
 
 ## Workflow
 
 ### Step 1: Gather Evaluation Results
 
-1.  Locate the evaluation results. These may be in a local directory or a Google Cloud Storage bucket.
+1.  Locate the evaluation results. These may be in a local directory (`eval-results/<timestamp>/<model>/`) or a Google Cloud Storage bucket.
 2.  If the results are in GCS, use `gsutil` or `gcloud storage` to list and copy the files locally for analysis.
-3.  Read the result JSON files to understand the tasks run, pass rates, and specific failure details in the `grader_results`.
+3.  Read the result JSON files across all evaluated models (`gemini`, `claude`, `codex`) to understand the tasks run, pass rates, and specific failure details in `grader_results`.
 4.  **Debugging with Workspaces**: For detailed debugging of failures, including inspecting generated files and running validation scripts, refer to the `author-evals` skill.
 
-### Step 2: Analyze Against Configuration (`eval.yaml`)
+### Step 2: Analyze Against Configuration (`eval.yaml` / `eval.criteria.yaml`)
 
-1.  Read the `eval.yaml` file in the repository root to understand the specific requirements and expected behaviors for each task.
-2.  Pay attention to the `graders` section, especially `tool_usage` requirements (e.g., expected tools).
-3.  Compare the actual tool calls and outputs in the result logs with the expectations in `eval.yaml`.
-4.  **Identify Eval Flaws**: Check if `eval.yaml` contains cases that are overly constrained or that should be changed to better test the skill. If a task requires a capability that the mandatory tools do not support (e.g., custom registry support), suggest updating the eval to remove that constraint or relax the tool usage requirement.
+1.  Read `eval.yaml` and `eval.criteria.yaml` in the repository root to understand the specific requirements and expected behaviors for each task.
+2.  Pay attention to the `graders` section, including deterministic scripts (`scripts/validate-*.py`, `scripts/validate-*.sh`) and `llm_rubric` assertions.
+3.  Compare the actual outputs in the result logs with the expectations in the eval config.
+4.  **Identify Eval Flaws**: Check if the eval config contains cases that are overly constrained or that should be changed to better test the skill.
 
-### Step 3: Identify Skill Gaps
+### Step 3: Identify Skill & Reference Doc Gaps
 
 1.  Locate the current skills in the `./skills` directory at the workspace root (not in `.agent/skills`).
-2.  Analyze the relevant skill file (e.g., `SKILL.md`) to see if it covers the failed scenario or if the instructions are unclear.
-3.  Identify gaps where the skill file lacks clarity on mandatory steps, tool usage, or best practices that led to the failure.
+2.  Analyze both the top-level `SKILL.md` and all deep reference files in `./skills/cloud/<skill>/references/` to see if they cover the failed scenario or if `references/` has drifted out of sync with `SKILL.md`.
+3.  Identify gaps where `SKILL.md` or `references/` lacks clarity on mandatory steps, multi-provider support (GitHub, GitLab, Bitbucket), supply-chain security (SBOMs, Binary Authorization, secret leak prevention), or authentication/permission error handling.
 4.  **Differentiate Environment Issues**: Check if the failure was caused by the test environment (e.g., missing IAM permissions, disabled APIs, missing tools). If so, call this out to the user as an environment failure, write a local file (e.g., `ENV_ISSUES.md`) to the workspace root detailing the issue and required action, and do not update the skill to fix it.
-5.  **Check Tool Source Code**: If a failure is suspected to be caused by a tool limitation, check the source code of the MCP tools in `./cicd-mcp-server` to understand the tool's behavior and parameters. This can help determine if the tool needs to be updated or if the skill needs to be adapted to use it correctly.
 
-### Step 4: Formulate General Improvements
+### Step 4: Formulate General, Cross-Model Improvements
 
 1.  **Rule of No Eval Bias**: When updating a skill, do NOT reference "evaluation scores", "evals", or specific evaluation tasks. Never update a skill to simply check for a specific file named in an eval or to use a specific tool just because the eval requires it, unless that tool is a best practice for the workflow.
-2.  Focus on **Scope and Applicability**: Update descriptions to follow a consistent pattern in the YAML front matter:
+2.  **Keep `SKILL.md` and `references/` Synchronized**: Whenever a workflow rule, JSON schema field (such as `sample-deployment-config.json`), or CLI flag requirement is updated in `SKILL.md`, immediately update the corresponding deep documentation under `references/` so agents reading progressive disclosure docs receive consistent instructions.
+3.  **Cross-Model Portability (`Gemini`, `Claude`, `OpenAI Codex`)**:
+    - Write clear, deterministic shell snippets and structured checklists that work equally well across Gemini, Claude, and OpenAI models.
+    - Reference workspace context files portably (`GEMINI.md`, `CLAUDE.md`, or `AGENTS.md`).
+4.  Focus on **Scope and Applicability**: Update descriptions to follow a consistent pattern in the YAML front matter:
     - High-level description.
-    - Why it's important to activate (e.g., why the skill is more useful than individual tools, encoding best practices that tools alone cannot achieve).
+    - Why it's important to activate (encoding best practices that tools alone cannot achieve).
     - When to activate (triggers).
-    - **Optimizing Descriptions**:
-    -   Use imperative phrasing (e.g., "Use this skill when...") rather than describing what it does.
-    -   Focus on user intent, not internal mechanics.
-    -   Err on the side of being pushy: Explicitly list contexts where the skill applies, including cases where the user doesn't name the domain directly (e.g., "even if they don't explicitly mention CSV or analysis").
-    -   Avoid overfitting keywords from failed queries; address the general concept.
-    -   Respect the hard limit of 1024 characters for descriptions.
-3.  **Move Triggers to Description**: Include skill activation triggers within the description field of the YAML front matter to make them immediately visible to the model and encourage activation.
-4.  **Soft but Clear Wording**: Avoid overly harsh terms like "CRITICAL" or "MANDATORY" in skills, but clearly state that the skill *should* be activated to ensure best practices are followed.
-5.  Focus on **Best Practices**: Add instructions that ensure correct and secure operation (e.g., mandatory security scans, resource checks).
-6.  Ensure the improvements are general enough to help in direct user interactions while also addressing the root cause that caused the evaluation to fail.
-7.  **Incremental Focus**: Prioritize small, targeted updates over broad rewrites. Focus on addressing the specific issue identified without risking regression of other functionality.
-8.  **Highlight Skill Value Over Tools**: Ensure skills clearly articulate their value proposition over raw tool usage. This helps prevent the model from bypassing skills in favor of a set of tools that might seem to achieve the goal but lack the embedded best practices and structured workflow of the skill.
-9.  **Avoid Environment-Specific Tool Prefixes**: Do not hardcode tool names with environment-specific prefixes (e.g., `mcp_cicd_`) in skill files if they represent implementation details. Prefer using generic or core tool names to ensure skills remain portable across different environments or tool delivery mechanisms.
+    - Respect the hard limit of 1024 characters for descriptions.
+5.  **Move Triggers to Description**: Include skill activation triggers within the description field of the YAML front matter to make them immediately visible to the model and encourage activation.
+6.  Focus on **Best Practices & Error Handling**: Add instructions that ensure correct, secure operation (e.g., pre-build secret scanning, SPDX SBOM export, Binary Authorization verification, and fail-closed diagnosis on `401`/`403` authentication or permission errors without bypassing security controls).
+7.  **Incremental Focus**: Prioritize targeted, well-structured updates over broad rewrites.
 
 ## External References
 

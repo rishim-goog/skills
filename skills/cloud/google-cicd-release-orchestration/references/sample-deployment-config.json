@@ -22,7 +22,9 @@
       "service_name": "<app-name>-prod",
       "public_access": false,
       "container_port": 8080,
-      "require_confirmation": true
+      "require_confirmation": true,
+      "binary_authorization": "default",
+      "binary_authorization_policy": "prod-policy"
     }
   },
   "gke": {
